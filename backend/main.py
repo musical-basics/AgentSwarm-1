@@ -315,7 +315,10 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     await websocket.send_json({"event": "workflow_start", "message": prompt})
     
     # Create artifacts directory
-    os.makedirs(os.path.join(fs_manager.workspace_path, "_swarm_artifacts"), exist_ok=True)
+    import datetime
+    run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    artifact_dir = f"_swarm_artifacts/{run_timestamp}"
+    os.makedirs(os.path.join(fs_manager.workspace_path, artifact_dir), exist_ok=True)
     
     # === Station 1: The Origin ===
     print("Starting station: origin")
@@ -334,7 +337,7 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     })
     
     # Save Origin artifact
-    fs_manager.write_file("_swarm_artifacts/0_origin.md", prompt)
+    fs_manager.write_file(f"{artifact_dir}/0_origin.md", prompt)
     files = fs_manager.list_files()
     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     
@@ -375,7 +378,7 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
         spec, usage = await llm.generate(sys_prompt, f"ORIGINAL REQUEST:\n{prompt}", model_name=active_model)
         
         # Save Spec artifact
-        fs_manager.write_file("_swarm_artifacts/1_spec.md", spec)
+        fs_manager.write_file(f"{artifact_dir}/1_spec.md", spec)
         files = fs_manager.list_files()
         await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -425,7 +428,7 @@ Ensure the logic handles the edge cases defined in the PRD."""
         plan, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
         
         # Save Planner artifact
-        fs_manager.write_file("_swarm_artifacts/2_plan.md", plan)
+        fs_manager.write_file(f"{artifact_dir}/2_plan.md", plan)
         files = fs_manager.list_files()
         await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -513,7 +516,7 @@ Use this exact schema:
         usage = type('Usage', (), {'prompt_tokens': 0, 'completion_tokens': 0})()
         
         # Save Executor Raw artifact
-        fs_manager.write_file("_swarm_artifacts/3_executor_raw.md", code_output)
+        fs_manager.write_file(f"{artifact_dir}/3_executor_raw.md", code_output)
         
         # JSON Extraction
         import json
@@ -571,7 +574,7 @@ Write a concise Markdown review document. Point out anything missing or incorrec
         
         qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
         
-        fs_manager.write_file("_swarm_artifacts/4_qa_review.md", qa_output)
+        fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
         files = fs_manager.list_files()
         await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         await websocket.send_json({
