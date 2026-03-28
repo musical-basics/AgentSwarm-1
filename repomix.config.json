@@ -26,7 +26,8 @@
       "frontend/**",
       "_v0_frontend/components/ui/**",
       "**/.next/**",
-      "**/out/**"
+      "**/out/**",
+      "workspace_sandbox/**"
     ]
   }
 }

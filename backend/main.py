@@ -178,7 +178,9 @@ llm = LLMEngine(os.getenv("OPENROUTER_API_KEY", ""))
 import re
 import subprocess
 
-async def execute_agent_chat(websocket: WebSocket, message: str, model: str, history: list, fs_mgr: FileSystemManager):
+async def execute_agent_chat(websocket: WebSocket, message: str, model: str, history: list, fs_mgr: FileSystemManager, models_dict: dict = None):
+    if models_dict is None:
+        models_dict = {}
     """Direct AI chat agent with sandboxed terminal command execution."""
     workspace = fs_mgr.workspace_path
 
@@ -192,6 +194,7 @@ Rules:
 - After running a command, interpret the output naturally and explain what happened.
 - You can run multiple commands in one response if needed.
 - If the user asks you to create, edit, or run files, do it via commands.
+- If the user asks you to build an app, website, or 'run this through the swarm', DO NOT write the code yourself. Instead, gather requirements and use the <swarm>your detailed prompt</swarm> tag to delegate the exact specifications to the Swarm Engine.
 - ERROR HANDLING: If a command fails (e.g., "command not found: python"), analyze the error and TRY A FIX yourself in your next response! For example, on macOS, use `python3` instead of `python`. If a module is missing, run `<cmd>pip3 install module_name</cmd>` and then retry.
 """
 
@@ -225,10 +228,18 @@ Rules:
         })
         return
 
+    # Parse <swarm>...</swarm> blocks and trigger them
+    swarm_pattern = re.compile(r'<swarm>(.*?)</swarm>', re.DOTALL)
+    swarm_found = swarm_pattern.findall(text)
+    
     # Parse <cmd>...</cmd> blocks and execute them
     cmd_pattern = re.compile(r'<cmd>(.*?)</cmd>', re.DOTALL)
     commands_found = cmd_pattern.findall(text)
     command_results = []
+
+    for swarm_prompt in swarm_found:
+        asyncio.create_task(execute_live_swarm(websocket, swarm_prompt.strip(), models_dict))
+        command_results.append({"cmd": f"<swarm>{swarm_prompt.strip()[:50]}...</swarm>", "output": "🚀 Swarm Engine Triggered. Watch the simulator panel!"})
 
     for cmd_str in commands_found:
         cmd_str = cmd_str.strip()
@@ -596,7 +607,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = data.get("message", "")
                 model = data.get("model", "google/gemini-2.5-flash")
                 history = data.get("history", [])
-                asyncio.create_task(execute_agent_chat(websocket, msg, model, history, fs_manager))
+                models_dict = data.get("models", {})
+                asyncio.create_task(execute_agent_chat(websocket, msg, model, history, fs_manager, models_dict))
 
             elif command == "rename_file":
                 try:

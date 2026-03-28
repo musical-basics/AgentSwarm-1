@@ -298,8 +298,8 @@ export function FlowmindIDE() {
         } else if (data.event === "agent_chat_response") {
           setIsChatTyping(false);
           const text = data.text || "";
-          // Strip <cmd>...</cmd> tags from display text — show them as separate blocks
-          const cleanText = text.replace(/<cmd>[\s\S]*?<\/cmd>/g, "").trim();
+          // Strip <cmd>...</cmd> and <swarm>...</swarm> tags from display text
+          const cleanText = text.replace(/<cmd>[\s\S]*?<\/cmd>/g, "").replace(/<swarm>[\s\S]*?<\/swarm>/g, "").trim();
           setChatMessages(prev => [
             ...prev,
             {
@@ -452,6 +452,7 @@ export function FlowmindIDE() {
           message: userMsg,
           model: chatAgentModel,
           history: chatMessages.slice(-10).map(m => ({ role: m.role, content: m.content })),
+          models: nodeModels,
         }));
       }
       setChatInput("");
