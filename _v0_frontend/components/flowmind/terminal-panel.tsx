@@ -61,6 +61,8 @@ export function TerminalPanel() {
 
       ws.onopen = () => {
         term.write("\r\n\x1b[36m❖ Flowmind PTY Terminal Initialized\x1b[0m\r\n\r\n");
+        // Send initial resize
+        ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       };
 
       ws.onmessage = (e) => {
@@ -83,10 +85,16 @@ export function TerminalPanel() {
         // term.write("\r\n\x1b[31m[WebSocket connection failed...]\x1b[0m\r\n");
       };
 
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      });
+
       // Send keystrokes directly to Python PTY over websocket
       term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
+          ws.send(JSON.stringify({ type: "input", data }));
         }
       });
     };

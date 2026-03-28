@@ -119,6 +119,11 @@ class FileSystemManager:
             f.write(content)
 
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../workspace_sandbox"))
+_initial_state = load_ide_state()
+_saved_workspace = _initial_state.get("last_workspace")
+if _saved_workspace and os.path.isdir(_saved_workspace):
+    WORKSPACE_DIR = _saved_workspace
+
 fs_manager = FileSystemManager(WORKSPACE_DIR)
 
 llm = LLMEngine(os.getenv("OPENROUTER_API_KEY", ""))
@@ -573,10 +578,12 @@ async def pty_endpoint(websocket: WebSocket):
     
     if pid == 0:
         os.chdir(fs_manager.workspace_path)
+        os.environ["PWD"] = fs_manager.workspace_path
         shell = os.environ.get("SHELL", "/bin/sh")
         os.environ["TERM"] = "xterm-256color"
         try:
-            os.execv(shell, [shell])
+            # We want to start a login shell so it loads user rc files correctly
+            os.execv(shell, [shell, "-l"])
         except Exception as e:
             print("Failed to spawn shell", e)
             os._exit(1)
@@ -596,20 +603,34 @@ async def pty_endpoint(websocket: WebSocket):
                     break
 
         async def read_from_ws():
+            import json
+            import struct
+            import termios
             try:
                 while True:
-                    data = await websocket.receive_text()
-                    os.write(fd, data.encode('utf-8'))
-            except Exception:
-                pass
+                    raw_data = await websocket.receive_text()
+                    try:
+                        msg = json.loads(raw_data)
+                        if msg.get("type") == "resize":
+                            rows = int(msg.get("rows", 24))
+                            cols = int(msg.get("cols", 80))
+                            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                            fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+                        elif msg.get("type") == "input":
+                            os.write(fd, msg.get("data", "").encode('utf-8'))
+                    except json.JSONDecodeError:
+                        # Fallback for purely raw text
+                        os.write(fd, raw_data.encode('utf-8'))
+            except Exception as e:
+                print(f"WS read error: {e}")
 
         try:
-            pty_task = asyncio.ensure_future(asyncio.gather(
-                read_from_pty(),
-                read_from_ws(),
-                return_exceptions=True
-            ))
-            await pty_task
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(read_from_pty()), asyncio.create_task(read_from_ws())],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in pending:
+                t.cancel()
         except (asyncio.CancelledError, WebSocketDisconnect, Exception):
             pass
         finally:
