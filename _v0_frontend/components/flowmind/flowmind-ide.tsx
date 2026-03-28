@@ -684,7 +684,7 @@ export function FlowmindIDE() {
               </div>
 
               {/* Top Row: Origin and Spec */}
-              <div className="flex items-center gap-4 mb-6 mt-8">
+              <div className="flex items-center gap-4 mb-6 mt-12">
                 <div className="relative">
                   <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
                   <WorkflowNode
@@ -707,7 +707,7 @@ export function FlowmindIDE() {
               </div>
 
               {/* Vertical connection */}
-              <div className="flex justify-center mb-6">
+              <div className="flex justify-center mb-6 mt-4">
                 <VerticalConnectionLine active={connectionState.specToPlanner} />
               </div>
 
@@ -1010,7 +1010,7 @@ function PythonLine({ line }: { line: string }) {
   );
 }
 
-// Model Selector Dropdown
+// Model Selector Dropdown (Dual Provider/Model)
 function NodeModelSelector({ 
   value, 
   onChange, 
@@ -1020,16 +1020,52 @@ function NodeModelSelector({
   onChange: (val: string) => void; 
   options: {id: string, name: string, pricing?: any}[] 
 }) {
+  const currentCompany = value ? value.split('/')[0] : "";
+  const companies = Array.from(new Set(options.map(o => o.id.split('/')[0]))).sort((a, b) => a.localeCompare(b));
+  
+  const handleCompanyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newCompany = e.target.value;
+    if (newCompany) {
+       const firstModel = options.find(o => o.id.split('/')[0] === newCompany);
+       if (firstModel) onChange(firstModel.id);
+    } else {
+       onChange("");
+    }
+  };
+
+  const filteredOptions = currentCompany ? options.filter(o => o.id.split('/')[0] === currentCompany) : options;
+
   return (
-    <div className="absolute -top-7 left-1/2 -translate-x-1/2 w-full min-w-[140px] max-w-[220px] px-2 z-20">
+    <div className="absolute -top-[54px] left-1/2 -translate-x-1/2 w-full min-w-[140px] max-w-[220px] px-2 z-20 flex flex-col gap-1.5">
+      {/* Provider Dropdown */}
+      <select 
+        value={currentCompany} 
+        onChange={handleCompanyChange}
+        className="w-full text-[10px] bg-[#12121a] text-[#22d3ee] border border-[#22d3ee]/20 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-[#22d3ee]/60 transition-colors uppercase font-semibold"
+        style={{ boxShadow: "0 0 10px rgba(0,0,0,0.5)" }}
+      >
+        <option value="">PROVIDER...</option>
+        {companies.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      
+      {/* Model Dropdown */}
       <select 
         value={value} 
         onChange={e => onChange(e.target.value)}
         className="w-full text-[11px] bg-[#12121a] text-[#cccccc] border border-[#22d3ee]/30 rounded px-1.5 py-1 outline-none cursor-pointer hover:border-[#22d3ee]/60 transition-colors"
+        disabled={!currentCompany}
         style={{ boxShadow: "0 0 10px rgba(0,0,0,0.5)" }}
       >
-        <option value="">Default Model...</option>
-        {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        <option value="">MODEL...</option>
+        {filteredOptions.map(o => {
+           let display = o.name;
+           if (display.toLowerCase().startsWith(currentCompany.toLowerCase() + ":")) {
+             display = display.substring(currentCompany.length + 1).trim();
+           } else if (display.toLowerCase().startsWith(currentCompany.toLowerCase() + " ")) {
+             display = display.substring(currentCompany.length + 1).trim();
+           }
+           return <option key={o.id} value={o.id}>{display}</option>;
+         })}
       </select>
     </div>
   );
