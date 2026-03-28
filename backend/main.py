@@ -100,6 +100,9 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     # Let the UI reset state
     await websocket.send_json({"event": "workflow_start", "message": prompt})
     
+    # Create artifacts directory
+    os.makedirs(os.path.join(fs_manager.workspace_path, "_swarm_artifacts"), exist_ok=True)
+    
     # === Station 1: The Origin ===
     print("Starting station: origin")
     await websocket.send_json({
@@ -115,6 +118,12 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
         "text": f"Raw Idea Captured: {prompt}",
         "stage": "origin"
     })
+    
+    # Save Origin artifact
+    fs_manager.write_file("_swarm_artifacts/0_origin.md", prompt)
+    files = fs_manager.list_files()
+    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    
     # Complete origin
     await asyncio.sleep(0.5)
     await websocket.send_json({"event": "station_update", "station": "origin", "status": "complete"})
@@ -145,6 +154,11 @@ Generate a comprehensive Product Requirements Document (PRD). You must define:
 3. Explicitly define the exact file structure required."""
         
         spec, usage = await llm.generate(sys_prompt, f"ORIGINAL REQUEST:\n{prompt}", model_name=active_model)
+        
+        # Save Spec artifact
+        fs_manager.write_file("_swarm_artifacts/1_spec.md", spec)
+        files = fs_manager.list_files()
+        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
         # Broadcast the generated spec
         await websocket.send_json({
@@ -184,6 +198,12 @@ Define exactly how the files import and interact with each other."""
         user_prompt = f"ORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}"
         
         plan, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
+        
+        # Save Planner artifact
+        fs_manager.write_file("_swarm_artifacts/2_plan.md", plan)
+        files = fs_manager.list_files()
+        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        
         await websocket.send_json({
             "event": "chat", "sender": "swarm", "text": plan, "stage": "planner", 
             "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
@@ -225,6 +245,9 @@ Do not use markdown code blocks inside the <file> tag, just raw code."""
         user_prompt = f"CURRENT WORKSPACE FILES:\n{existing_files_str}\n\nORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}\n\nARCHITECT PLAN:\n{plan}"
         
         code_output, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
+        
+        # Save Executor Raw artifact
+        fs_manager.write_file("_swarm_artifacts/3_executor_raw.md", code_output)
         
         # Robust Regex Extraction: Remove markdown blocks that wrap the <file> tags
         import re
