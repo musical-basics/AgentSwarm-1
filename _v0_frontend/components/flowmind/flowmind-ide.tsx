@@ -23,6 +23,7 @@ import {
   GripVertical,
   GripHorizontal,
   Save,
+  Download,
 } from "lucide-react";
 
 type NodeStatus = "idle" | "active" | "complete";
@@ -169,13 +170,32 @@ export function FlowmindIDE() {
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const [modelOptions, setModelOptions] = useState<{id: string, name: string, pricing?: any}[]>([]);
+  const [modelOptions, setModelOptions] = useState<any[]>([]);
   const [nodeModels, setNodeModels] = useState({
     origin: "google/gemini-2.5-flash",
     specFactory: "anthropic/claude-3-haiku",
     planner: "google/gemini-2.5-flash",
     executor: "anthropic/claude-3-haiku",
   });
+
+  const handleExportModels = () => {
+    if (!modelOptions.length) return;
+    const headers = ["ID", "Name", "Context Length", "Prompt Cost ($)", "Completion Cost ($)", "Image Cost ($)", "Architecture/Modality"];
+    const escape = (str: any) => `"${String(str || "").replace(/"/g, '""')}"`;
+    const rows = modelOptions.map(m => {
+      const p = m.pricing || {};
+      const arch = m.architecture ? `${m.architecture.modality || "text"} (${m.architecture.instruct_type || "base"})` : "Text (General)";
+      return [escape(m.id), escape(m.name), escape(m.context_length), escape(p.prompt), escape(p.completion), escape(p.image), escape(arch)].join(",");
+    });
+    const blob = new Blob([headers.join(",") + "\n" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "openrouter_models.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   useEffect(() => {
     fetch("https://openrouter.ai/api/v1/models")
@@ -443,13 +463,20 @@ export function FlowmindIDE() {
           {/* Glowing edge */}
           <div className="absolute top-0 right-0 bottom-0 w-px bg-gradient-to-b from-[#22d3ee]/40 via-[#a855f7]/20 to-[#22d3ee]/40" />
           
-          <div className="px-3 py-3 border-b border-[#22d3ee]/10">
+          <div className="px-3 py-3 border-b border-[#22d3ee]/10 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Terminal className="w-3.5 h-3.5 text-[#22d3ee]" style={{ filter: "drop-shadow(0 0 4px rgba(34,211,238,0.5))" }} />
               <span className="text-[10px] font-semibold text-[#22d3ee] uppercase tracking-wider">
                 Workspace Sandbox
               </span>
             </div>
+            <button
+              onClick={handleOpenFolder}
+              className="p-1 hover:bg-[#22d3ee]/10 rounded transition-colors text-[#808080] hover:text-[#22d3ee]"
+              title="Open Folder"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+            </button>
           </div>
           <div className="flex-1 overflow-auto px-1 py-2">
             <FileTree
@@ -586,6 +613,25 @@ export function FlowmindIDE() {
             <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
               {/* Top Action Buttons */}
               <div className="absolute top-4 right-4 flex items-center gap-3 z-30">
+                <motion.button
+                  onClick={handleExportModels}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                  style={{
+                    background: "rgba(168,85,247,0.1)",
+                    border: "1px solid rgba(168,85,247,0.3)",
+                    color: "#a855f7",
+                  }}
+                  whileHover={{ 
+                    scale: 1.05,
+                    backgroundColor: "rgba(168,85,247,0.2)",
+                    boxShadow: "0 0 15px rgba(168,85,247,0.3)",
+                  }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export Models
+                </motion.button>
+
                 <motion.button
                   onClick={() => {
                     if (socket) {
