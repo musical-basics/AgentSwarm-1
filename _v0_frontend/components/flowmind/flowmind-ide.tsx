@@ -529,7 +529,7 @@ export function FlowmindIDE() {
               selectedFile={selectedFile}
               onSelectFile={(name) => { setSelectedFile(name); if (socket) socket.send(JSON.stringify({ command: "read_file", path: name })); }}
               onToggleFolder={toggleFolder}
-              onContextMenu={(e, path, isDir) => {
+              onContextMenu={(e: React.MouseEvent, path: string, isDir: boolean) => {
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, path, isDir });
               }}
@@ -537,6 +537,7 @@ export function FlowmindIDE() {
               renameValue={renameValue}
               setRenameValue={setRenameValue}
               onRenameSubmit={submitRename}
+              onRenameCancel={() => setRenamingPath(null)}
               path={[]}
             />
           </div>
@@ -941,6 +942,7 @@ function FileTree({
   renameValue,
   setRenameValue,
   onRenameSubmit,
+  onRenameCancel,
   path,
 }: {
   items: FileItem[];
@@ -952,6 +954,7 @@ function FileTree({
   renameValue?: string;
   setRenameValue?: (v: string) => void;
   onRenameSubmit?: () => void;
+  onRenameCancel?: () => void;
   path: string[];
 }) {
   return (
@@ -988,7 +991,7 @@ function FileTree({
                       value={renameValue}
                       autoFocus
                       onChange={(e) => setRenameValue?.(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") setRenameValue?.(""); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") onRenameCancel?.(); }}
                       onClick={(e) => e.stopPropagation()}
                     />
                   ) : (
@@ -1007,6 +1010,7 @@ function FileTree({
                       renameValue={renameValue}
                       setRenameValue={setRenameValue}
                       onRenameSubmit={onRenameSubmit}
+                      onRenameCancel={onRenameCancel}
                       path={currentPath}
                     />
                   </div>
@@ -1040,7 +1044,7 @@ function FileTree({
                     value={renameValue}
                     autoFocus
                     onChange={(e) => setRenameValue?.(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") setRenameValue?.(""); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") onRenameCancel?.(); }}
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
