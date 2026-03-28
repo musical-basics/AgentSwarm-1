@@ -135,11 +135,12 @@ The user's current workspace is at: {workspace}
 You can run shell commands inside the workspace sandbox by embedding them like this: <cmd>your shell command</cmd>
 Rules:
 - Commands are executed with cwd set to the workspace directory.
-- Never access paths outside the workspace.
+- Never access paths outside the workspace limit.
 - Only run commands that are safe and relevant to the user's request.
 - After running a command, interpret the output naturally and explain what happened.
 - You can run multiple commands in one response if needed.
 - If the user asks you to create, edit, or run files, do it via commands.
+- ERROR HANDLING: If a command fails (e.g., "command not found: python"), analyze the error and TRY A FIX yourself in your next response! For example, on macOS, use `python3` instead of `python`. If a module is missing, run `<cmd>pip3 install module_name</cmd>` and then retry.
 """
 
     messages = [{"role": "system", "content": system_prompt}]
