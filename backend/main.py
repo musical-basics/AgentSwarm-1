@@ -323,11 +323,16 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     try:
         # === Call OpenRouter API for Spec ===
         active_model = models.get("specFactory", "google/gemini-2.5-flash")
-        sys_prompt = """You are the Product Manager (Spec Factory). 
-Generate a comprehensive Product Requirements Document (PRD). You must define:
-1. Core purpose of the project.
-2. All required dependencies and libraries.
-3. Explicitly define the exact file structure required."""
+        sys_prompt = """You are the Chief Product Officer (Spec Factory). 
+Your ONLY job is to write a comprehensive Product Requirements Document (PRD) in Markdown.
+CRITICAL MANDATE: YOU ARE STRICTLY FORBIDDEN FROM WRITING ACTUAL CODE SYNTAX. 
+You must define:
+1. Core Purpose & Target Audience.
+2. Comprehensive Feature Requirements.
+3. Edge Cases & UX constraints.
+4. Required dependencies and libraries.
+5. Exact file structure required.
+Do not write implementation details. Define the 'What' and the 'Why', never the 'How'."""
         
         spec, usage = await llm.generate(sys_prompt, f"ORIGINAL REQUEST:\n{prompt}", model_name=active_model)
         
@@ -366,9 +371,15 @@ Generate a comprehensive Product Requirements Document (PRD). You must define:
     await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Planning architecture and layout...", "stage": "planner"})
     try:
         active_model = models.get("planner", "google/gemini-2.5-flash")
-        sys_prompt = """You are a Senior Systems Architect (Planner). 
-Take the Spec and write out the exact, function-by-function pseudo-code and data flow for every single file.
-Define exactly how the files import and interact with each other."""
+        sys_prompt = """You are the Senior Systems Architect (Planner). 
+Take the PRD and write an exhaustive, function-by-function architectural plan in Markdown.
+CRITICAL MANDATE: DO NOT WRITE EXECUTABLE CODE. You must use pseudo-code and architectural diagrams.
+You must define:
+1. Data Models and State Management.
+2. Exact data flow between components.
+3. API Contracts (Inputs, Outputs, and Types for every single function).
+4. Step-by-step logic for complex algorithms.
+Ensure the logic handles the edge cases defined in the PRD."""
         
         # Accumulate payload
         user_prompt = f"ORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}"
@@ -409,13 +420,14 @@ Define exactly how the files import and interact with each other."""
         existing_files_str = "\n".join(existing_files) if existing_files else "No files exist currently."
 
         active_model = models.get("executor", "anthropic/claude-3-haiku")
-        sys_prompt = """You are a junior syntax translator (Executor).
-Read the exhaustive Plan and translate it directly into code.
-IMPORTANT: Output each file exactly in this format so the system can extract it:
-<file path="filename.ext">
-...code...
+        sys_prompt = """You are the Senior Execution Drone.
+Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
+CRITICAL MANDATE: NO CONVERSATIONAL FILLER. Do not explain your code. Do not say "Here is the code."
+You must output each required file exactly in this format so the system can extract it:
+<file path="relative/path/to/filename.ext">
+...raw code...
 </file>
-Do not use markdown code blocks inside the <file> tag, just raw code."""
+Do not wrap the <file> tags inside markdown code blocks. Ensure all imports are present and the code is complete, not truncated."""
         
         # Accumulating Payload + Context Injection
         user_prompt = f"CURRENT WORKSPACE FILES:\n{existing_files_str}\n\nORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}\n\nARCHITECT PLAN:\n{plan}"
