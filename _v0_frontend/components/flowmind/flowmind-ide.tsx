@@ -918,13 +918,17 @@ function FileTree({
             </>
           ) : (
             <motion.button
-              onClick={() => onSelectFile(item.name)}
+              onClick={() => {
+                // Strip the root workspace name from the path for the backend
+                const relativePath = path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name;
+                onSelectFile(relativePath);
+              }}
               className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-left ml-4 transition-all ${
-                selectedFile === item.name
+                selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name)
                   ? "bg-[#22d3ee]/20 border border-[#22d3ee]/40"
                   : "hover:bg-[#22d3ee]/10"
               }`}
-              style={selectedFile === item.name ? { boxShadow: "0 0 10px rgba(34,211,238,0.2)" } : {}}
+              style={selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name) ? { boxShadow: "0 0 10px rgba(34,211,238,0.2)" } : {}}
               whileHover={{ x: 2 }}
             >
               <FileText
@@ -937,7 +941,7 @@ function FileTree({
                 }`}
                 style={item.name.endsWith(".py") ? { filter: "drop-shadow(0 0 2px rgba(34,211,238,0.3))" } : {}}
               />
-              <span className={`text-xs ${selectedFile === item.name ? "text-[#22d3ee]" : "text-[#808080]"}`}>{item.name}</span>
+              <span className={`text-xs ${selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name) ? "text-[#22d3ee]" : "text-[#808080]"}`}>{item.name}</span>
             </motion.button>
           )}
         </div>

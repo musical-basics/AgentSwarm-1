@@ -33,11 +33,16 @@ export function TerminalPanel() {
     term.loadAddon(fitAddon);
 
     term.open(terminalRef.current);
-    requestAnimationFrame(() => {
+    let fitTimeout: any;
+    const initialFit = () => {
       try {
         fitAddon.fit();
+        if (term.cols < 10) {
+          fitTimeout = setTimeout(initialFit, 50);
+        }
       } catch (e) {}
-    });
+    };
+    initialFit();
 
     // Resize observer
     const resizeObserver = new ResizeObserver(() => {
