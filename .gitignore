@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-electron/
+.env
+.DS_Store
+backend/venv/
+backend/__pycache__/
