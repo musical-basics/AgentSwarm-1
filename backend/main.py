@@ -46,6 +46,28 @@ class LLMEngine:
         response = await self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content, response.usage
 
+    async def generate_stream(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash", is_json: bool = False):
+        kwargs = {
+            "extra_headers": {
+                "HTTP-Referer": "http://localhost:6500",
+                "X-Title": "Flowmind IDE",
+            },
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "max_tokens": 4000,
+            "stream": True,
+        }
+        if is_json:
+            kwargs["response_format"] = {"type": "json_object"}
+            
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
 import json
 
 STATE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".ide_state.json"))
@@ -199,7 +221,7 @@ Rules:
 - After running a command, interpret the output naturally and explain what happened.
 - You can run multiple commands in one response if needed.
 - If the user asks you to create, edit, or run files, do it via commands.
-- If the user asks you to build an app, website, or 'run this through the swarm', DO NOT write the code yourself. Instead, gather requirements and use the <swarm>your detailed prompt</swarm> tag to delegate the exact specifications to the Swarm Engine.
+- If the user asks you to build an app, website, or 'run this through the swarm', DO NOT write the code yourself. Instead, you MUST FIRST ask 2-3 clarifying questions to gather exact requirements (e.g. tech stack, color palette, feature specifics, target audience). DO NOT use the <swarm> tag on the first prompt. Wait until the user has answered your questions and provided enough detail. Once you have a sufficient PRD context from the conversation, ONLY THEN delegate the build to the Swarm Engine by outputting exactly: <swarm>The comprehensive request details here...</swarm>
 - ERROR HANDLING: If a command fails (e.g., "command not found: python"), analyze the error and TRY A FIX yourself in your next response! For example, on macOS, use `python3` instead of `python`. If a module is missing, run `<cmd>pip3 install module_name</cmd>` and then retry.
 """
 
@@ -419,7 +441,6 @@ Ensure the logic handles the edge cases defined in the PRD."""
     # === Station 4: EXECUTOR ===
     print("Starting station: executor")
     await websocket.send_json({"event": "station_update", "station": "executor", "status": "active"})
-    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Writing code natively...", "stage": "executor"})
     try:
         # Flatten workspace list to inject environment context
         def flatten_files(node_list, path=""):
@@ -470,7 +491,26 @@ Use this exact schema:
 =========================================
 """
         
-        code_output, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model, is_json=True)
+        code_output = ""
+        seen_paths = set()
+        import re
+        
+        await websocket.send_json({"event": "chat_stream_start", "sender": "swarm", "text": "Writing code natively...\n\n```json\n", "stage": "executor"})
+        
+        async for chunk_text in llm.generate_stream(sys_prompt, user_prompt, model_name=active_model, is_json=True):
+            code_output += chunk_text
+            await websocket.send_json({"event": "chat_stream_chunk", "sender": "swarm", "text": chunk_text, "stage": "executor"})
+            
+            matches = re.findall(r'"path"\s*:\s*"([^"]+)"', code_output)
+            new_paths = [m for m in matches if m not in seen_paths]
+            if new_paths:
+                for np in new_paths:
+                    seen_paths.add(np)
+                    fs_manager.write_file(np, "")
+                files = fs_manager.list_files()
+                await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        
+        usage = type('Usage', (), {'prompt_tokens': 0, 'completion_tokens': 0})()
         
         # Save Executor Raw artifact
         fs_manager.write_file("_swarm_artifacts/3_executor_raw.md", code_output)
@@ -501,16 +541,44 @@ Use this exact schema:
                 fs_manager.write_file(path, content)
                 saved_files.append(path)
             
-        text_out = f"Generated files physically successfully into workspace:\n" + "\n".join([f"- {sf}" for sf in saved_files]) if saved_files else "No files found in JSON output. Raw output included."
-        if not saved_files:
-            text_out += f"\n\n{code_output[:1000]}..."
+        text_out = f"\n```\n\nGenerated files physically successfully into workspace:\n" + "\n".join([f"- {sf}" for sf in saved_files]) if saved_files else "\n```\n\nNo files found in JSON output."
             
         await websocket.send_json({
-            "event": "chat", "sender": "swarm", "text": text_out, "stage": "executor", 
+            "event": "chat_stream_chunk", "sender": "swarm", "text": text_out, "stage": "executor", 
             "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
         })
         files = fs_manager.list_files()
         await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        
+        # === Station 4.5: QA REVIEWER ===
+        await websocket.send_json({"event": "station_update", "station": "qaReviewer", "status": "active"})
+        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Reviewing codebase for architectural alignment...", "stage": "qaReviewer"})
+        
+        qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
+        qa_sys_prompt = """You are the Lead QA Engineer. 
+Review the architectural plan and the generated codebase below. 
+Compare the codebase against the plan and PRD to ensure all requirements, UI elements, and logic were implemented correctly without hallucination.
+Write a concise Markdown review document. Point out anything missing or incorrect, and explicitly state what looks good. Focus on major architectural misses or UI discrepancies."""
+        
+        codebase_context = ""
+        for sf in saved_files:
+            try:
+                content = fs_manager.read_file(sf)
+                codebase_context += f"\n--- {sf} ---\n{content}\n"
+            except: pass
+            
+        qa_user_prompt = f"PLAN:\n{plan}\n\nGENERATED CODEBASE:\n{codebase_context}"
+        
+        qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
+        
+        fs_manager.write_file("_swarm_artifacts/4_qa_review.md", qa_output)
+        files = fs_manager.list_files()
+        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        await websocket.send_json({
+            "event": "chat", "sender": "swarm", "text": qa_output, "stage": "qaReviewer",
+            "usage": {"prompt_tokens": qa_usage.prompt_tokens, "completion_tokens": qa_usage.completion_tokens, "model": qa_model}
+        })
+        await websocket.send_json({"event": "station_update", "station": "qaReviewer", "status": "complete"})
         
         await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Determining execution commands...", "stage": "executor"})
         runner_sys_prompt = """You are the DevOps Runner.

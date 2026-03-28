@@ -35,12 +35,14 @@ interface NodeState {
   specFactory: NodeStatus;
   planner: NodeStatus;
   executor: NodeStatus;
+  qaReviewer: NodeStatus;
 }
 
 interface ConnectionState {
   originToSpec: boolean;
   specToPlanner: boolean;
   plannerToExecutor: boolean;
+  executorToQa: boolean;
 }
 
 interface FileItem {
@@ -129,6 +131,7 @@ export function FlowmindIDE() {
     specFactory: "idle",
     planner: "idle",
     executor: "idle",
+    qaReviewer: "idle",
   });
 
   const monaco = useMonaco();
@@ -163,6 +166,7 @@ export function FlowmindIDE() {
     originToSpec: false,
     specToPlanner: false,
     plannerToExecutor: false,
+    executorToQa: false,
   });
 
   const [isSimulating, setIsSimulating] = useState(false);
@@ -190,6 +194,7 @@ export function FlowmindIDE() {
     specFactory: "anthropic/claude-3-haiku",
     planner: "google/gemini-2.5-flash",
     executor: "anthropic/claude-3-haiku",
+    qaReviewer: "google/gemini-2.5-flash",
   });
 
   const handleExportModels = () => {
@@ -312,6 +317,19 @@ export function FlowmindIDE() {
           ]);
         } else if (data.event === "chat") {
           setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage, usage: data.usage }]);
+        } else if (data.event === "chat_stream_start") {
+          setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage }]);
+        } else if (data.event === "chat_stream_chunk") {
+          setChatMessages(prev => {
+            const newMsgs = [...prev];
+            if (newMsgs.length > 0) {
+               newMsgs[newMsgs.length - 1].content += data.text;
+               if (data.usage) {
+                 newMsgs[newMsgs.length - 1].usage = data.usage;
+               }
+            }
+            return newMsgs;
+          });
         } else if (data.event === "monaco_update") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
@@ -325,12 +343,14 @@ export function FlowmindIDE() {
           } else if (data.station === "planner" && data.status === "complete") {
              setConnectionState(prev => ({ ...prev, specToPlanner: false, plannerToExecutor: true }));
           } else if (data.station === "executor" && data.status === "complete") {
-             setConnectionState(prev => ({ ...prev, plannerToExecutor: false }));
+             setConnectionState(prev => ({ ...prev, plannerToExecutor: false, executorToQa: true }));
+          } else if (data.station === "qaReviewer" && data.status === "complete") {
+             setConnectionState(prev => ({ ...prev, executorToQa: false }));
           }
         } else if (data.event === "workflow_start") {
           setIsSimulating(true);
-          setNodeState({ origin: "idle", specFactory: "idle", planner: "idle", executor: "idle" });
-          setConnectionState({ originToSpec: false, specToPlanner: false, plannerToExecutor: false });
+          setNodeState({ origin: "idle", specFactory: "idle", planner: "idle", executor: "idle", qaReviewer: "idle" });
+          setConnectionState({ originToSpec: false, specToPlanner: false, plannerToExecutor: false, executorToQa: false });
         } else if (data.event === "workflow_complete") {
           setIsSimulating(false);
           setChatMessages(prev => [...prev, { role: "agent" as any, content: "Swarm workflow complete! Ready for next task." }]);
@@ -924,6 +944,16 @@ export function FlowmindIDE() {
                     icon={<CodeIcon status={nodeState.executor} />}
                   />
                 </div>
+                <ConnectionLine active={connectionState.executorToQa} />
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="QA REVIEWER"
+                    status={nodeState.qaReviewer}
+                    color="rose"
+                    icon={<Shield className="w-5 h-5 text-rose-400" />} 
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1353,7 +1383,7 @@ function WorkflowNode({
 }: {
   title: string;
   status: NodeStatus;
-  color: "cyan" | "purple" | "emerald" | "amber";
+  color: "cyan" | "purple" | "emerald" | "amber" | "rose";
   icon: React.ReactNode;
 }) {
   const colorMap = {
@@ -1380,6 +1410,12 @@ function WorkflowNode({
       border: "#fbbf24",
       bg: "rgba(251,191,36,0.15)",
       text: "#fbbf24",
+    },
+    rose: {
+      glow: "0 0 30px rgba(244,63,94,0.6), 0 0 60px rgba(244,63,94,0.4), 0 0 90px rgba(244,63,94,0.2)",
+      border: "#f43f5e",
+      bg: "rgba(244,63,94,0.15)",
+      text: "#f43f5e",
     },
   };
 
