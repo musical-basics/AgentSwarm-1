@@ -27,19 +27,23 @@ class LLMEngine:
             api_key=api_key or "DUMMY_KEY",
         )
 
-    async def generate(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash") -> tuple[str, any]:
-        response = await self.client.chat.completions.create(
-            extra_headers={
+    async def generate(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash", is_json: bool = False) -> tuple[str, any]:
+        kwargs = {
+            "extra_headers": {
                 "HTTP-Referer": "http://localhost:3008",
                 "X-Title": "Flowmind IDE",
             },
-            model=model_name,
-            messages=[
+            "model": model_name,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_tokens=4000,
-        )
+            "max_tokens": 4000,
+        }
+        if is_json:
+            kwargs["response_format"] = {"type": "json_object"}
+            
+        response = await self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content, response.usage
 
 import json
@@ -434,43 +438,69 @@ Ensure the logic handles the edge cases defined in the PRD."""
         sys_prompt = """You are the Senior Execution Drone.
 Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
 CRITICAL MANDATE: NO CONVERSATIONAL FILLER. Do not explain your code. Do not say "Here is the code."
-You must output each required file exactly in this format so the system can extract it:
-<file path="relative/path/to/filename.ext">
-...raw code...
-</file>
-Do not wrap the <file> tags inside markdown code blocks. Ensure all imports are present and the code is complete, not truncated."""
+Ensure all imports are present and the code is complete, not truncated."""
         
         # Accumulating Payload + Context Injection
-        user_prompt = f"CURRENT WORKSPACE FILES:\n{existing_files_str}\n\nORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}\n\nARCHITECT PLAN:\n{plan}"
+        user_prompt = f"""CURRENT WORKSPACE FILES:
+{existing_files_str}
+
+ORIGINAL REQUEST:
+{prompt}
+
+SPEC (PRD):
+{spec}
+
+ARCHITECT PLAN:
+{plan}
+
+=========================================
+CRITICAL OUTPUT INSTRUCTIONS:
+You MUST return your response as a single, valid JSON object. 
+DO NOT wrap the JSON in markdown code blocks. DO NOT include any conversational text.
+Use this exact schema:
+{{
+  "files": [
+    {{
+      "path": "relative/path/filename.ext",
+      "content": "raw file content here"
+    }}
+  ]
+}}
+=========================================
+"""
         
-        code_output, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
+        code_output, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model, is_json=True)
         
         # Save Executor Raw artifact
         fs_manager.write_file("_swarm_artifacts/3_executor_raw.md", code_output)
         
-        # Robust Regex Extraction: Remove markdown blocks that wrap the <file> tags
-        import re
-        clean_output = code_output
-        clean_output = re.sub(r'```[a-zA-Z]*\n(<file)', r'\1', clean_output)
-        clean_output = re.sub(r'(</file>)\n```', r'\1', clean_output)
+        # JSON Extraction
+        import json
+        clean_output = code_output.strip()
+        if clean_output.startswith("```json"):
+            clean_output = clean_output[7:]
+        elif clean_output.startswith("```"):
+            clean_output = clean_output[3:]
+        if clean_output.endswith("```"):
+            clean_output = clean_output[:-3]
+        clean_output = clean_output.strip()
         
-        file_matches = list(re.finditer(r'<file\s+path=["\']([^"\']+)["\']>\n?(.*?)\n?</file>', clean_output, re.DOTALL))
+        try:
+            parsed_data = json.loads(clean_output)
+            files_to_save = parsed_data.get("files", [])
+        except json.JSONDecodeError as e:
+            files_to_save = []
+            
         saved_files = []
-        for match in file_matches:
-            path = match.group(1).strip()
-            content = match.group(2)
+        for file_obj in files_to_save:
+            path = file_obj.get("path", "").strip()
+            content = file_obj.get("content", "")
+            if path:
+                # Use fs_manager strictly for boundary-safe recursive writing
+                fs_manager.write_file(path, content)
+                saved_files.append(path)
             
-            # Additional safety: gracefully strip markdown ticks inside the content if the LLM mistakenly injects them
-            content = content.strip()
-            if content.startswith("```"):
-                content = re.sub(r'^```[a-zA-Z]*\n', '', content)
-                content = re.sub(r'\n```$', '', content)
-                
-            # Use fs_manager strictly for boundary-safe recursive writing
-            fs_manager.write_file(path, content)
-            saved_files.append(path)
-            
-        text_out = f"Generated files physically successfully into workspace:\n" + "\n".join([f"- {sf}" for sf in saved_files]) if saved_files else "No files matched `<file path='...'>` format. Raw output included."
+        text_out = f"Generated files physically successfully into workspace:\n" + "\n".join([f"- {sf}" for sf in saved_files]) if saved_files else "No files found in JSON output. Raw output included."
         if not saved_files:
             text_out += f"\n\n{code_output[:1000]}..."
             
