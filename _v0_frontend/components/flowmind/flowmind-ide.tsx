@@ -315,12 +315,23 @@ export function FlowmindIDE() {
   }, []);
 
   const handleOpenFolder = async () => {
+    console.log("[OpenFolder] Button clicked");
+    console.log("[OpenFolder] window.electronAPI:", window.electronAPI);
+    console.log("[OpenFolder] socket state:", socket?.readyState);
+    
     if (window.electronAPI) {
+      console.log("[OpenFolder] Calling electronAPI.openDirectory()...");
       const folderPath = await window.electronAPI.openDirectory();
+      console.log("[OpenFolder] Got folder path:", folderPath);
+      
       if (folderPath && socket) {
+        console.log("[OpenFolder] Sending set_workspace to backend:", folderPath);
         socket.send(JSON.stringify({ command: "set_workspace", path: folderPath }));
+      } else {
+        console.warn("[OpenFolder] Aborted - folderPath:", folderPath, "socket:", socket?.readyState);
       }
     } else {
+      console.warn("[OpenFolder] window.electronAPI is undefined - not running in Electron?");
       alert("Please run inside electron to open folders.");
     }
   };
