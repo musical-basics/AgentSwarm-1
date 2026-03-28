@@ -399,5 +399,64 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         print("Client disconnected")
 
+@app.websocket("/pty")
+async def pty_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    
+    import pty
+    import os
+    import fcntl
+    import signal
+    import asyncio
+    
+    pid, fd = pty.fork()
+    
+    if pid == 0:
+        os.chdir(fs_manager.workspace_path)
+        shell = os.environ.get("SHELL", "/bin/sh")
+        os.environ["TERM"] = "xterm-256color"
+        try:
+            os.execv(shell, [shell])
+        except Exception as e:
+            print("Failed to spawn shell", e)
+            os._exit(1)
+    else:
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        
+        async def read_from_pty():
+            while True:
+                try:
+                    data = os.read(fd, 8192)
+                    if data:
+                        await websocket.send_bytes(data)
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+                except Exception:
+                    break
+
+        async def read_from_ws():
+            try:
+                while True:
+                    data = await websocket.receive_text()
+                    os.write(fd, data.encode('utf-8'))
+            except Exception:
+                pass
+
+        try:
+            await asyncio.gather(
+                read_from_pty(),
+                read_from_ws(),
+                return_exceptions=True
+            )
+        finally:
+            # CRITICAL: Prevent Zombie Processes
+            try:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+                os.close(fd)
+            except Exception as e:
+                print(f"Cleanup error for PTY {pid}: {e}")
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)

@@ -3,6 +3,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMonaco } from "@monaco-editor/react";
+import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
+import { TerminalPanel } from "./terminal-panel";
 import {
   Sparkles,
   Shield,
@@ -505,54 +507,68 @@ export function FlowmindIDE() {
         </div>
 
         {/* Center - Code Editor with Cyberpunk Style */}
-        <div className="flex-1 flex flex-col min-w-0 relative">
-          {/* Tab Bar */}
-          <div className="h-10 bg-gradient-to-r from-[#0d0d12] to-[#12121a] border-b border-[#a855f7]/20 flex items-center shrink-0 relative">
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-[#a855f7]/30 via-[#22d3ee]/20 to-transparent" />
-            
-            <motion.div 
-              className="flex items-center h-full px-4 bg-[#0a0a0f] border-r border-[#22d3ee]/30 gap-2 relative"
-              whileHover={{ backgroundColor: "rgba(34,211,238,0.05)" }}
-            >
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#22d3ee]" style={{ boxShadow: "0 0 8px rgba(34,211,238,0.5)" }} />
-              <FileText className="w-3.5 h-3.5 text-[#22d3ee]" />
-              <span className="text-xs text-[#22d3ee]">{selectedFile}</span>
-            </motion.div>
-          </div>
+        <div className="flex-1 flex min-w-0 relative">
+          <PanelGroup direction="vertical">
+            <Panel defaultSize={70} minSize={30} className="flex flex-col min-h-0 relative">
+              {/* Tab Bar */}
+              <div className="h-10 bg-gradient-to-r from-[#0d0d12] to-[#12121a] border-b border-[#a855f7]/20 flex items-center shrink-0 relative">
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-[#a855f7]/30 via-[#22d3ee]/20 to-transparent" />
+                
+                <motion.div 
+                  className="flex items-center h-full px-4 bg-[#0a0a0f] border-r border-[#22d3ee]/30 gap-2 relative"
+                  whileHover={{ backgroundColor: "rgba(34,211,238,0.05)" }}
+                >
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#22d3ee]" style={{ boxShadow: "0 0 8px rgba(34,211,238,0.5)" }} />
+                  <FileText className="w-3.5 h-3.5 text-[#22d3ee]" />
+                  <span className="text-xs text-[#22d3ee]">{selectedFile}</span>
+                </motion.div>
+              </div>
 
-          {/* Editor Content */}
-          <div className="flex-1 overflow-auto bg-[#0a0a0f] relative">
-            {/* Subtle scanlines */}
-            <div 
-              className="absolute inset-0 pointer-events-none opacity-5"
-              style={{
-                background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.03) 2px, rgba(34,211,238,0.03) 4px)",
-              }}
-            />
+              {/* Editor Content */}
+              <div className="flex-1 overflow-auto bg-[#0a0a0f] relative min-h-0">
+                {/* Subtle scanlines */}
+                <div 
+                  className="absolute inset-0 pointer-events-none opacity-5 z-10"
+                  style={{
+                    background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.03) 2px, rgba(34,211,238,0.03) 4px)",
+                  }}
+                />
+                
+                <Editor
+                  height="100%"
+                  theme="cyberpunk"
+                  path={selectedFile}
+                  value={fileContentsCache[selectedFile] || "// Loading..."}
+                  options={{ 
+                    readOnly: true, 
+                    minimap: { enabled: false }, 
+                    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+                    fontSize: 13,
+                    lineHeight: 24,
+                    padding: { top: 16, bottom: 16 },
+                    scrollbar: {
+                      vertical: 'hidden',
+                      horizontal: 'hidden'
+                    },
+                    overviewRulerLanes: 0,
+                    hideCursorInOverviewRuler: true,
+                    overviewRulerBorder: false,
+                  }}
+                />
+              </div>
+            </Panel>
             
-              <Editor
-                height="100%"
-                theme="cyberpunk"
-                path={selectedFile}
-                value={fileContentsCache[selectedFile] || "// Loading..."}
-                options={{ 
-                  readOnly: true, 
-                  minimap: { enabled: false }, 
-                  fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-                  fontSize: 13,
-                  lineHeight: 24,
-                  padding: { top: 16, bottom: 16 },
-                  scrollbar: {
-                    vertical: 'hidden',
-                    horizontal: 'hidden'
-                  },
-                  overviewRulerLanes: 0,
-                  hideCursorInOverviewRuler: true,
-                  overviewRulerBorder: false,
-                }}
-              />
-
-          </div>
+            {/* Horizontal Resize handle between Editor and Terminal */}
+            <PanelResizeHandle className="h-1 bg-[#22d3ee]/10 hover:bg-[#22d3ee]/40 transition-colors cursor-row-resize shrink-0">
+              <div className="w-full h-full relative group">
+                  <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[2px] opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-transparent via-[#22d3ee] to-transparent shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+              </div>
+            </PanelResizeHandle>
+            
+            <Panel defaultSize={30} minSize={20} className="flex flex-col min-h-0 relative">
+              <TerminalPanel />
+            </Panel>
+          </PanelGroup>
         </div>
 
         {/* Right Panel Resize Handle */}
