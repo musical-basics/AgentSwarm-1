@@ -121,6 +121,7 @@ import Editor from "@monaco-editor/react";
 export function FlowmindIDE() {
 
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null); // Ref to avoid stale closures
   const [fileContentsCache, setFileContentsCache] = useState<Record<string, string>>({});
   const [nodeState, setNodeState] = useState<NodeState>({
     origin: "idle",
@@ -233,6 +234,7 @@ export function FlowmindIDE() {
       ws.onopen = () => {
         console.log("Connected to backend");
         setSocket(ws);
+        socketRef.current = ws;
         ws.send(JSON.stringify({ command: "list_files", path: "" }));
       };
 
@@ -317,21 +319,22 @@ export function FlowmindIDE() {
   const handleOpenFolder = async () => {
     console.log("[OpenFolder] Button clicked");
     console.log("[OpenFolder] window.electronAPI:", window.electronAPI);
-    console.log("[OpenFolder] socket state:", socket?.readyState);
+    console.log("[OpenFolder] socketRef.current:", socketRef.current?.readyState);
     
     if (window.electronAPI) {
       console.log("[OpenFolder] Calling electronAPI.openDirectory()...");
       const folderPath = await window.electronAPI.openDirectory();
       console.log("[OpenFolder] Got folder path:", folderPath);
       
-      if (folderPath && socket) {
+      const activeSocket = socketRef.current;
+      if (folderPath && activeSocket && activeSocket.readyState === WebSocket.OPEN) {
         console.log("[OpenFolder] Sending set_workspace to backend:", folderPath);
-        socket.send(JSON.stringify({ command: "set_workspace", path: folderPath }));
+        activeSocket.send(JSON.stringify({ command: "set_workspace", path: folderPath }));
       } else {
-        console.warn("[OpenFolder] Aborted - folderPath:", folderPath, "socket:", socket?.readyState);
+        console.warn("[OpenFolder] Aborted - folderPath:", folderPath, "socketRef.readyState:", activeSocket?.readyState);
       }
     } else {
-      console.warn("[OpenFolder] window.electronAPI is undefined - not running in Electron?");
+      console.warn("[OpenFolder] window.electronAPI is undefined");
       alert("Please run inside electron to open folders.");
     }
   };
@@ -397,7 +400,7 @@ export function FlowmindIDE() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (chatInput.trim() && !isSimulating) {
-      if (socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels }));
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels }));
       setChatInput("");
     }
   };
@@ -419,12 +422,13 @@ export function FlowmindIDE() {
 
   const handleContextMenuAction = (action: string, path: string) => {
     setContextMenu(null);
-    if (!socket) return;
+    const sock = socketRef.current;
+    if (!sock || sock.readyState !== WebSocket.OPEN) return;
     if (action === "reveal") {
-      socket.send(JSON.stringify({ command: "reveal_in_finder", path }));
+      sock.send(JSON.stringify({ command: "reveal_in_finder", path }));
     } else if (action === "delete") {
       if (confirm(`Delete "${path.split("/").pop()}"? This cannot be undone.`)) {
-        socket.send(JSON.stringify({ command: "delete_file", path }));
+        sock.send(JSON.stringify({ command: "delete_file", path }));
       }
     } else if (action === "rename") {
       setRenamingPath(path);
@@ -433,8 +437,9 @@ export function FlowmindIDE() {
   };
 
   const submitRename = () => {
-    if (!socket || !renamingPath || !renameValue.trim()) return;
-    socket.send(JSON.stringify({ command: "rename_file", old_path: renamingPath, new_name: renameValue.trim() }));
+    const sock = socketRef.current;
+    if (!sock || sock.readyState !== WebSocket.OPEN || !renamingPath || !renameValue.trim()) return;
+    sock.send(JSON.stringify({ command: "rename_file", old_path: renamingPath, new_name: renameValue.trim() }));
     setRenamingPath(null);
   };
 
@@ -538,7 +543,7 @@ export function FlowmindIDE() {
             <FileTree
               items={files}
               selectedFile={selectedFile}
-              onSelectFile={(name) => { setSelectedFile(name); if (socket) socket.send(JSON.stringify({ command: "read_file", path: name })); }}
+              onSelectFile={(name) => { setSelectedFile(name); if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ command: "read_file", path: name })); }}
               onToggleFolder={toggleFolder}
               onContextMenu={(e: React.MouseEvent, path: string, isDir: boolean) => {
                 e.preventDefault();
