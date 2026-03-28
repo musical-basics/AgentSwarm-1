@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@xyflow/react": "^12.10.2",
     "allotment": "^1.20.5",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",

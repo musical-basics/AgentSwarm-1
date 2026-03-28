@@ -3,6 +3,7 @@ import Editor from "@monaco-editor/react";
 import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { FileCode2, Command } from "lucide-react";
+import FlowDashboard from "./FlowDashboard";
 
 type FileNode = {
   name: string;
@@ -22,6 +23,7 @@ export default function App() {
   const [fileContent, setFileContent] = useState<string>("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [inputVal, setInputVal] = useState("");
+  const [stationsStatus, setStationsStatus] = useState<Record<string, string>>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,21 +35,29 @@ export default function App() {
       ws.onopen = () => {
         console.log("Connected to backend");
         setSocket(ws);
+        ws.send(JSON.stringify({ command: "list_files", path: "" }));
       };
 
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === "file_list") {
+        if (data.event === "file_list") {
           setFiles(data.files || []);
-        } else if (data.type === "file_content") {
+        } else if (data.event === "file_content") {
           setActiveFile(data.path);
           setFileContent(data.content);
-        } else if (data.type === "chat") {
+        } else if (data.event === "chat") {
           setChatHistory(prev => [...prev, { sender: data.sender, text: data.text }]);
-        } else if (data.type === "monaco_update") {
+        } else if (data.event === "monaco_update") {
           setActiveFile(data.path);
           setFileContent(data.content);
-        } else if (data.type === "error") {
+        } else if (data.event === "station_update") {
+          setStationsStatus(prev => ({ ...prev, [data.station]: data.status }));
+        } else if (data.event === "workflow_start") {
+          setStationsStatus({});
+          setChatHistory(prev => [...prev, { sender: "user", text: data.message }]);
+        } else if (data.event === "workflow_complete") {
+          setChatHistory(prev => [...prev, { sender: "swarm", text: "Workflow complete. Generating files..." }]);
+        } else if (data.event === "error") {
           console.error(data.message);
         }
       };
@@ -85,7 +95,7 @@ export default function App() {
     <div className="w-full h-full flex flex-col bg-[#1e1e1e] text-white overflow-hidden">
       <header className="h-10 bg-[#333] flex items-center px-4 shrink-0 text-sm font-semibold select-none shadow-md z-10">
         <Command size={18} className="text-blue-400 mr-2" />
-        AgentSwarm Local IDE
+        Flowmind Factory IDE
       </header>
       <div className="flex-1 w-full relative">
         <Allotment className="allotment-override">
@@ -112,43 +122,7 @@ export default function App() {
           </Allotment.Pane>
           <Allotment.Pane>
             <Allotment>
-              <Allotment.Pane minSize={300} preferredSize="40%" className="border-r border-[#333]">
-                <div className="h-full flex flex-col">
-                  <div className="px-4 py-2 bg-[#252526] text-xs font-semibold text-gray-400 border-b border-[#333]">
-                    AGENT CHAT
-                  </div>
-                  <div className="flex-1 p-4 overflow-auto flex flex-col gap-4">
-                    {chatHistory.length === 0 && (
-                      <div className="text-center text-gray-500 mt-10 text-sm">
-                        Send a message to the swarm simulator.
-                      </div>
-                    )}
-                    {chatHistory.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`p-3 max-w-[85%] rounded text-sm shadow-md text-gray-100 ${
-                          msg.sender === 'user' 
-                          ? 'bg-blue-600 rounded-tr-sm' 
-                          : 'bg-[#2a2d2e] rounded-tl-sm border border-[#3c3f41] text-gray-300'
-                        }`}>
-                          {msg.text}
-                        </div>
-                      </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                  </div>
-                  <div className="p-4 bg-[#252526] border-t border-[#333]">
-                    <input
-                      type="text"
-                      className="w-full bg-[#1e1e1e] text-white p-3 text-sm rounded outline-none border border-[#3c3f41] focus:border-blue-500 transition-colors shadow-inner"
-                      placeholder="Ask agent to build something..."
-                      value={inputVal}
-                      onChange={(e) => setInputVal(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                    />
-                  </div>
-                </div>
-              </Allotment.Pane>
-              <Allotment.Pane minSize={400}>
+              <Allotment.Pane minSize={300} preferredSize="50%" className="border-r border-[#333]">
                 <div className="h-full flex flex-col bg-[#1e1e1e]">
                   <div className="px-4 py-2 bg-[#1e1e1e] text-xs font-mono text-gray-400 border-b border-[#333]">
                     {activeFile ? activeFile : "No file selected"}
@@ -172,6 +146,47 @@ export default function App() {
                         Select a file from the sidebar to view code
                       </div>
                     )}
+                  </div>
+                </div>
+              </Allotment.Pane>
+              <Allotment.Pane minSize={400}>
+                <div className="h-full flex flex-col">
+                  <div className="flex-1 relative border-b border-[#333]">
+                     <FlowDashboard stationsStatus={stationsStatus} />
+                  </div>
+                  <div className="h-[250px] bg-[#1e1e1e] flex flex-col">
+                    <div className="px-4 py-2 bg-[#252526] text-xs font-semibold text-gray-400 border-b border-[#333]">
+                      AGENT CHAT (Control)
+                    </div>
+                    <div className="flex-1 p-4 overflow-auto flex flex-col gap-4">
+                      {chatHistory.length === 0 && (
+                        <div className="text-center text-gray-500 mt-2 text-sm">
+                          Send a prompt to test the Flowmind simulator.
+                        </div>
+                      )}
+                      {chatHistory.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`p-2 max-w-[85%] rounded text-sm shadow-md text-gray-100 ${
+                            msg.sender === 'user' 
+                            ? 'bg-blue-600 rounded-tr-sm' 
+                            : 'bg-[#2a2d2e] rounded-tl-sm border border-[#3c3f41] text-gray-300'
+                          }`}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={chatEndRef} />
+                    </div>
+                    <div className="p-4 bg-[#252526] border-t border-[#333]">
+                      <input
+                        type="text"
+                        className="w-full bg-[#1e1e1e] text-white p-3 text-sm rounded outline-none border border-[#3c3f41] focus:border-blue-500 transition-colors shadow-inner"
+                        placeholder="Ask agent to build something..."
+                        value={inputVal}
+                        onChange={(e) => setInputVal(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                      />
+                    </div>
                   </div>
                 </div>
               </Allotment.Pane>

@@ -5,3 +5,7 @@ dist-electron/
 .DS_Store
 backend/venv/
 backend/__pycache__/
+
+# Repomix Files
+**repomix**
+!repomix.config.json

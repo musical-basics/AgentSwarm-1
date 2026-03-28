@@ -27,6 +27,8 @@ class FileSystemManager:
         for item in os.listdir(safe_path):
             item_path = os.path.join(safe_path, item)
             is_dir = os.path.isdir(item_path)
+            if item.startswith('.'):
+                continue
             tree.append({
                 "name": item,
                 "path": os.path.relpath(item_path, self.workspace_path),
@@ -47,12 +49,46 @@ class FileSystemManager:
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../workspace_sandbox"))
 fs_manager = FileSystemManager(WORKSPACE_DIR)
 
+async def simulate_swarm_workflow(websocket: WebSocket, msg: str):
+    stations = ["idea", "spec_factory", "planner", "executor"]
+    
+    # Let the UI reset state
+    await websocket.send_json({"event": "workflow_start", "message": msg})
+    
+    for station in stations:
+        print(f"Starting station: {station}")
+        # Active status
+        await websocket.send_json({"event": "station_update", "station": station, "status": "active"})
+        await asyncio.sleep(2)
+        
+        # Complete status
+        await websocket.send_json({"event": "station_update", "station": station, "status": "complete"})
+    
+    # After simulation is done, generate mock code
+    mock_filename = "simulation.txt"
+    mock_content = f"Simulated code generation for prompt:\n'{msg}'\n\n```python\nprint('Hello Flowmind')\n```"
+    fs_manager.write_file(mock_filename, mock_content)
+    
+    # Tell UI to update Monaco and files
+    await websocket.send_json({
+        "event": "monaco_update",
+        "path": mock_filename,
+        "content": mock_content
+    })
+    
+    files = fs_manager.list_files()
+    await websocket.send_json({"event": "file_list", "files": files})
+    
+    # Broadcast workflow complete
+    await websocket.send_json({"event": "workflow_complete"})
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     # Send initial file list
     files = fs_manager.list_files()
-    await websocket.send_json({"type": "file_list", "files": files})
+    await websocket.send_json({"event": "file_list", "files": files})
+    
     try:
         while True:
             data = await websocket.receive_json()
@@ -60,52 +96,28 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if command == "list_files":
                 files = fs_manager.list_files(data.get("path", ""))
-                await websocket.send_json({"type": "file_list", "files": files})
+                await websocket.send_json({"event": "file_list", "files": files})
                 
             elif command == "read_file":
                 try:
                     content = fs_manager.read_file(data.get("path"))
-                    await websocket.send_json({"type": "file_content", "path": data.get("path"), "content": content})
+                    await websocket.send_json({"event": "file_content", "path": data.get("path"), "content": content})
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "message": str(e)})
+                    await websocket.send_json({"event": "error", "message": str(e)})
                     
             elif command == "write_file":
                 try:
                     fs_manager.write_file(data.get("path"), data.get("content"))
-                    await websocket.send_json({"type": "file_written", "path": data.get("path")})
+                    await websocket.send_json({"event": "file_written", "path": data.get("path")})
                     files = fs_manager.list_files()
-                    await websocket.send_json({"type": "file_list", "files": files})
+                    await websocket.send_json({"event": "file_list", "files": files})
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "message": str(e)})
+                    await websocket.send_json({"event": "error", "message": str(e)})
 
             elif command == "swarm_message":
-                msg = data.get("message")
-                
-                # Wait 2 sec
-                await asyncio.sleep(2)
-                
-                mock_filename = "simulation.txt"
-                
-                # Stream back mock status response
-                await websocket.send_json({
-                    "type": "chat", 
-                    "sender": "swarm", 
-                    "text": f"Agent is editing {mock_filename}..."
-                })
-                
-                # Push mock text update
-                mock_content = f"Simulated code generation for prompt:\n'{msg}'\n\n```python\nprint('Hello World')\n```"
-                fs_manager.write_file(mock_filename, mock_content)
-                
-                # UI mock code update
-                await websocket.send_json({
-                    "type": "monaco_update",
-                    "path": mock_filename,
-                    "content": mock_content
-                })
-                # Refresh file tree
-                files = fs_manager.list_files()
-                await websocket.send_json({"type": "file_list", "files": files})
+                msg = data.get("message", "Build something")
+                # Spawn simulate async task so websocket is not fully blocked if reading events
+                asyncio.create_task(simulate_swarm_workflow(websocket, msg))
                 
     except WebSocketDisconnect:
         print("Client disconnected")

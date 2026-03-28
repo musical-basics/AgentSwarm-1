@@ -1,0 +1,27 @@
+{
+  "output": {
+    "filePath": "repomix.xml",
+    "style": "xml"
+  },
+  "ignore": {
+    "useGitignore": true,
+    "customPatterns": [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/dist-electron/**",
+      "**/venv/**",
+      "**/public/**",
+      "**/*.svg",
+      "**/*.png",
+      "**/*.css",
+      "**/eslint.config.js",
+      "**/postcss.config.js",
+      "**/tailwind.config.js",
+      "**/tsconfig.*",
+      "**/.gitignore",
+      "**/pnpm-lock.yaml",
+      "repomix.xml",
+      "repomix-instruction.md"
+    ]
+  }
+}
