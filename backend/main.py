@@ -414,9 +414,45 @@ async def websocket_endpoint(websocket: WebSocket):
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")
                 models_dict = data.get("models", {})
-                # Spawn simulate async task so websocket is not fully blocked if reading events
                 asyncio.create_task(execute_live_swarm(websocket, msg, models_dict))
-                
+
+            elif command == "rename_file":
+                try:
+                    old_path = fs_manager._get_safe_path(data.get("old_path", ""))
+                    new_name = data.get("new_name", "").strip()
+                    if not new_name or "/" in new_name or "\\" in new_name:
+                        raise ValueError("Invalid new name")
+                    new_path = os.path.join(os.path.dirname(old_path), new_name)
+                    new_path_safe = fs_manager._get_safe_path(os.path.relpath(new_path, fs_manager.workspace_path))
+                    os.rename(old_path, new_path_safe)
+                    files = fs_manager.list_files()
+                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"Rename failed: {str(e)}"})
+
+            elif command == "delete_file":
+                try:
+                    import shutil
+                    target_path = fs_manager._get_safe_path(data.get("path", ""))
+                    if os.path.isdir(target_path):
+                        shutil.rmtree(target_path)
+                    else:
+                        os.remove(target_path)
+                    files = fs_manager.list_files()
+                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"Delete failed: {str(e)}"})
+
+            elif command == "reveal_in_finder":
+                try:
+                    target_path = fs_manager._get_safe_path(data.get("path", ""))
+                    # Use the directory if it's a file
+                    reveal_path = target_path if os.path.isdir(target_path) else os.path.dirname(target_path)
+                    import subprocess
+                    subprocess.Popen(["open", "-R", target_path])
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"Reveal failed: {str(e)}"})
+
     except WebSocketDisconnect:
         print("Client disconnected")
 
@@ -465,11 +501,14 @@ async def pty_endpoint(websocket: WebSocket):
                 pass
 
         try:
-            await asyncio.gather(
+            pty_task = asyncio.ensure_future(asyncio.gather(
                 read_from_pty(),
                 read_from_ws(),
                 return_exceptions=True
-            )
+            ))
+            await pty_task
+        except (asyncio.CancelledError, WebSocketDisconnect, Exception):
+            pass
         finally:
             # CRITICAL: Prevent Zombie Processes
             try:

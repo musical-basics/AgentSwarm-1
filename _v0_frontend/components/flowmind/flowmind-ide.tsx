@@ -166,6 +166,11 @@ export function FlowmindIDE() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [files, setFiles] = useState<FileItem[]>(initialFiles);
   const [selectedFile, setSelectedFile] = useState("hello_swarm.py");
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
+  const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { role: "agent", content: "Send a prompt to test the Flowmind simulator." },
@@ -401,6 +406,27 @@ export function FlowmindIDE() {
     });
   };
 
+  const handleContextMenuAction = (action: string, path: string) => {
+    setContextMenu(null);
+    if (!socket) return;
+    if (action === "reveal") {
+      socket.send(JSON.stringify({ command: "reveal_in_finder", path }));
+    } else if (action === "delete") {
+      if (confirm(`Delete "${path.split("/").pop()}"? This cannot be undone.`)) {
+        socket.send(JSON.stringify({ command: "delete_file", path }));
+      }
+    } else if (action === "rename") {
+      setRenamingPath(path);
+      setRenameValue(path.split("/").pop() || "");
+    }
+  };
+
+  const submitRename = () => {
+    if (!socket || !renamingPath || !renameValue.trim()) return;
+    socket.send(JSON.stringify({ command: "rename_file", old_path: renamingPath, new_name: renameValue.trim() }));
+    setRenamingPath(null);
+  };
+
   return (
     <div ref={containerRef} className="h-screen w-screen flex flex-col bg-[#0a0a0f] text-[#cccccc] font-mono text-sm overflow-hidden">
       {/* Animated Background Grid */}
@@ -497,15 +523,52 @@ export function FlowmindIDE() {
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="flex-1 overflow-auto px-1 py-2">
+          <div className="flex-1 overflow-auto px-1 py-2 relative" onClick={() => setContextMenu(null)}>
             <FileTree
               items={files}
               selectedFile={selectedFile}
               onSelectFile={(name) => { setSelectedFile(name); if (socket) socket.send(JSON.stringify({ command: "read_file", path: name })); }}
               onToggleFolder={toggleFolder}
+              onContextMenu={(e, path, isDir) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, path, isDir });
+              }}
+              renamingPath={renamingPath}
+              renameValue={renameValue}
+              setRenameValue={setRenameValue}
+              onRenameSubmit={submitRename}
               path={[]}
             />
           </div>
+          
+          {/* Context Menu */}
+          {contextMenu && (
+            <div
+              className="fixed z-50 bg-[#12121a] border border-[#22d3ee]/30 rounded-lg overflow-hidden shadow-xl py-1 min-w-[160px]"
+              style={{ left: contextMenu.x, top: contextMenu.y, boxShadow: "0 0 20px rgba(34,211,238,0.2)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#cccccc] hover:bg-[#22d3ee]/10 hover:text-[#22d3ee] transition-colors"
+                onClick={() => { handleContextMenuAction("rename", contextMenu.path); }}
+              >
+                <span className="text-[#22d3ee]">✏️</span> Rename
+              </button>
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#cccccc] hover:bg-[#22d3ee]/10 hover:text-[#22d3ee] transition-colors"
+                onClick={() => { handleContextMenuAction("reveal", contextMenu.path); }}
+              >
+                <span className="text-[#fbbf24]">📂</span> Reveal in Finder
+              </button>
+              <div className="border-t border-[#22d3ee]/10 my-1" />
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#ef4444] hover:bg-[#ef4444]/10 transition-colors"
+                onClick={() => { handleContextMenuAction("delete", contextMenu.path); }}
+              >
+                <span>🗑️</span> Delete
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Sidebar Resize Handle */}
@@ -873,79 +936,121 @@ function FileTree({
   selectedFile,
   onSelectFile,
   onToggleFolder,
+  onContextMenu,
+  renamingPath,
+  renameValue,
+  setRenameValue,
+  onRenameSubmit,
   path,
 }: {
   items: FileItem[];
   selectedFile: string;
   onSelectFile: (name: string) => void;
   onToggleFolder: (path: string[]) => void;
+  onContextMenu?: (e: React.MouseEvent, path: string, isDir: boolean) => void;
+  renamingPath?: string | null;
+  renameValue?: string;
+  setRenameValue?: (v: string) => void;
+  onRenameSubmit?: () => void;
   path: string[];
 }) {
   return (
     <div className="space-y-0.5">
-      {items.map((item) => (
-        <div key={item.name}>
-          {item.type === "folder" ? (
-            <>
+      {items.map((item) => {
+        const currentPath = [...path, item.name];
+        // Strip root workspace folder from path for backend calls (skip first element = workspace name)
+        const backendPath = currentPath.length > 1 ? currentPath.slice(1).join("/") : currentPath[0];
+        const isRenaming = renamingPath === backendPath;
+
+        return (
+          <div key={item.name}>
+            {item.type === "folder" ? (
+              <>
+                <motion.button
+                  onClick={() => onToggleFolder(currentPath)}
+                  onContextMenu={(e) => onContextMenu?.(e, backendPath, true)}
+                  className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-left hover:bg-[#22d3ee]/10 transition-colors group"
+                  whileHover={{ x: 2 }}
+                >
+                  <ChevronRight
+                    className={`w-3 h-3 text-[#22d3ee]/50 transition-transform group-hover:text-[#22d3ee] ${
+                      item.expanded ? "rotate-90" : ""
+                    }`}
+                  />
+                  {item.expanded ? (
+                    <FolderOpen className="w-4 h-4 text-[#fbbf24]" style={{ filter: "drop-shadow(0 0 2px rgba(251,191,36,0.3))" }} />
+                  ) : (
+                    <Folder className="w-4 h-4 text-[#fbbf24]/70" />
+                  )}
+                  {isRenaming ? (
+                    <input
+                      className="text-xs bg-[#0a0a0f] border border-[#22d3ee]/60 rounded px-1 outline-none text-[#22d3ee] w-32"
+                      value={renameValue}
+                      autoFocus
+                      onChange={(e) => setRenameValue?.(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") setRenameValue?.(""); }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="text-xs text-[#808080] group-hover:text-[#cccccc]">{item.name}</span>
+                  )}
+                </motion.button>
+                {item.expanded && item.children && (
+                  <div className="ml-4 border-l border-[#22d3ee]/10 pl-1">
+                    <FileTree
+                      items={item.children}
+                      selectedFile={selectedFile}
+                      onSelectFile={onSelectFile}
+                      onToggleFolder={onToggleFolder}
+                      onContextMenu={onContextMenu}
+                      renamingPath={renamingPath}
+                      renameValue={renameValue}
+                      setRenameValue={setRenameValue}
+                      onRenameSubmit={onRenameSubmit}
+                      path={currentPath}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
               <motion.button
-                onClick={() => onToggleFolder([...path, item.name])}
-                className="flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-left hover:bg-[#22d3ee]/10 transition-colors group"
+                onClick={() => { if (!isRenaming) onSelectFile(backendPath); }}
+                onContextMenu={(e) => onContextMenu?.(e, backendPath, false)}
+                className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-left ml-4 transition-all ${
+                  selectedFile === backendPath
+                    ? "bg-[#22d3ee]/20 border border-[#22d3ee]/40"
+                    : "hover:bg-[#22d3ee]/10"
+                }`}
+                style={selectedFile === backendPath ? { boxShadow: "0 0 10px rgba(34,211,238,0.2)" } : {}}
                 whileHover={{ x: 2 }}
               >
-                <ChevronRight
-                  className={`w-3 h-3 text-[#22d3ee]/50 transition-transform group-hover:text-[#22d3ee] ${
-                    item.expanded ? "rotate-90" : ""
+                <FileText
+                  className={`w-4 h-4 ${
+                    item.name.endsWith(".py")
+                      ? "text-[#22d3ee]"
+                      : item.name.endsWith(".md")
+                        ? "text-[#a855f7]"
+                        : "text-[#808080]"
                   }`}
+                  style={item.name.endsWith(".py") ? { filter: "drop-shadow(0 0 2px rgba(34,211,238,0.3))" } : {}}
                 />
-                {item.expanded ? (
-                  <FolderOpen className="w-4 h-4 text-[#fbbf24]" style={{ filter: "drop-shadow(0 0 2px rgba(251,191,36,0.3))" }} />
-                ) : (
-                  <Folder className="w-4 h-4 text-[#fbbf24]/70" />
-                )}
-                <span className="text-xs text-[#808080] group-hover:text-[#cccccc]">{item.name}</span>
-              </motion.button>
-              {item.expanded && item.children && (
-                <div className="ml-4 border-l border-[#22d3ee]/10 pl-1">
-                  <FileTree
-                    items={item.children}
-                    selectedFile={selectedFile}
-                    onSelectFile={onSelectFile}
-                    onToggleFolder={onToggleFolder}
-                    path={[...path, item.name]}
+                {isRenaming ? (
+                  <input
+                    className="text-xs bg-[#0a0a0f] border border-[#22d3ee]/60 rounded px-1 outline-none text-[#22d3ee] w-32"
+                    value={renameValue}
+                    autoFocus
+                    onChange={(e) => setRenameValue?.(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") onRenameSubmit?.(); if (e.key === "Escape") setRenameValue?.(""); }}
+                    onClick={(e) => e.stopPropagation()}
                   />
-                </div>
-              )}
-            </>
-          ) : (
-            <motion.button
-              onClick={() => {
-                // Strip the root workspace name from the path for the backend
-                const relativePath = path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name;
-                onSelectFile(relativePath);
-              }}
-              className={`flex items-center gap-1.5 w-full px-2 py-1.5 rounded text-left ml-4 transition-all ${
-                selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name)
-                  ? "bg-[#22d3ee]/20 border border-[#22d3ee]/40"
-                  : "hover:bg-[#22d3ee]/10"
-              }`}
-              style={selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name) ? { boxShadow: "0 0 10px rgba(34,211,238,0.2)" } : {}}
-              whileHover={{ x: 2 }}
-            >
-              <FileText
-                className={`w-4 h-4 ${
-                  item.name.endsWith(".py")
-                    ? "text-[#22d3ee]"
-                    : item.name.endsWith(".md")
-                      ? "text-[#a855f7]"
-                      : "text-[#808080]"
-                }`}
-                style={item.name.endsWith(".py") ? { filter: "drop-shadow(0 0 2px rgba(34,211,238,0.3))" } : {}}
-              />
-              <span className={`text-xs ${selectedFile === (path.length > 0 ? [...path.slice(1), item.name].join("/") : item.name) ? "text-[#22d3ee]" : "text-[#808080]"}`}>{item.name}</span>
-            </motion.button>
-          )}
-        </div>
-      ))}
+                ) : (
+                  <span className={`text-xs ${selectedFile === backendPath ? "text-[#22d3ee]" : "text-[#808080]"}`}>{item.name}</span>
+                )}
+              </motion.button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
