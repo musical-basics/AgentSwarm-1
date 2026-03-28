@@ -59,6 +59,50 @@ def save_ide_state(state: dict):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
 
+active_ws_connections = set()
+
+import time
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class WorkspaceWatcher(FileSystemEventHandler):
+    def __init__(self):
+        super().__init__()
+        self._timer = None
+
+    def on_any_event(self, event):
+        if event.is_directory or "___" in event.src_path or ".DS_Store" in event.src_path:
+            return
+        
+        # Debounce broadcast
+        if self._timer:
+            self._timer.cancel()
+        
+        # Get active running loop safely
+        try:
+            loop = asyncio.get_running_loop()
+            self._timer = loop.call_later(0.3, lambda: asyncio.create_task(self.broadcast()))
+        except RuntimeError:
+            pass
+            
+    async def broadcast(self):
+        try:
+            files = fs_manager.list_files()
+            workspace_name = os.path.basename(fs_manager.workspace_path) or "Workspace"
+            dead_ws = set()
+            for ws in active_ws_connections:
+                try:
+                    await ws.send_json({"event": "file_list", "files": files, "workspace_name": workspace_name})
+                except Exception:
+                    dead_ws.add(ws)
+            for ws in dead_ws:
+                active_ws_connections.remove(ws)
+        except Exception as e:
+            print(f"Watchdog broadcast error: {e}")
+
+global_observer = Observer()
+global_watcher = WorkspaceWatcher()
+
 class FileSystemManager:
     def __init__(self, workspace_path: str):
         self.workspace_path = os.path.abspath(workspace_path)
@@ -125,6 +169,9 @@ if _saved_workspace and os.path.isdir(_saved_workspace):
     WORKSPACE_DIR = _saved_workspace
 
 fs_manager = FileSystemManager(WORKSPACE_DIR)
+
+global_observer.schedule(global_watcher, fs_manager.workspace_path, recursive=True)
+global_observer.start()
 
 llm = LLMEngine(os.getenv("OPENROUTER_API_KEY", ""))
 
@@ -419,12 +466,16 @@ Do not use markdown code blocks inside the <file> tag, just raw code."""
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    active_ws_connections.add(websocket)
     
     # Reload saved global workspace state
     state = load_ide_state()
     saved_workspace = state.get("last_workspace")
     if saved_workspace and os.path.isdir(saved_workspace):
         fs_manager.workspace_path = saved_workspace
+
+    if "layout" in state:
+        await websocket.send_json({"event": "layout_loaded", "layout": state["layout"]})
 
     # Send initial file list
     files = fs_manager.list_files()
@@ -471,6 +522,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     fs_manager.workspace_path = os.path.abspath(new_path)
                     files = fs_manager.list_files()
                     
+                    # Update global observer path
+                    try:
+                        global_observer.unschedule_all()
+                        global_observer.schedule(global_watcher, fs_manager.workspace_path, recursive=True)
+                    except Exception:
+                        pass
+                    
                     # Persist global state
                     state["last_workspace"] = fs_manager.workspace_path
                     save_ide_state(state)
@@ -488,6 +546,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             pass
                 else:
                     await websocket.send_json({"event": "error", "message": "Invalid directory path"})
+
+            elif command == "save_layout":
+                state["layout"] = data.get("layout", {})
+                save_ide_state(state)
 
             elif command == "save_config":
                 try:
@@ -563,6 +625,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         print("Client disconnected")
+    finally:
+        if websocket in active_ws_connections:
+            active_ws_connections.remove(websocket)
 
 @app.websocket("/pty")
 async def pty_endpoint(websocket: WebSocket):

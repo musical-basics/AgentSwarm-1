@@ -284,6 +284,12 @@ export function FlowmindIDE() {
           if (data.config) {
              setNodeModels(prev => ({ ...prev, ...data.config }));
           }
+        } else if (data.event === "layout_loaded") {
+          if (data.layout) {
+             if (data.layout.sidebarWidth) setSidebarWidth(data.layout.sidebarWidth);
+             if (data.layout.rightPanelWidth) setRightPanelWidth(data.layout.rightPanelWidth);
+             if (data.layout.chatHeight) setChatHeight(data.layout.chatHeight);
+          }
         } else if (data.event === "file_content") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
@@ -407,6 +413,19 @@ export function FlowmindIDE() {
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isDragging]);
+
+  const prevDraggingRef = useRef<"sidebar" | "rightPanel" | "chat" | null>(null);
+  useEffect(() => {
+    if (prevDraggingRef.current && !isDragging) {
+       if (socketRef.current?.readyState === WebSocket.OPEN) {
+         socketRef.current.send(JSON.stringify({
+           command: "save_layout",
+           layout: { sidebarWidth, rightPanelWidth, chatHeight }
+         }));
+       }
+    }
+    prevDraggingRef.current = isDragging;
+  }, [isDragging, sidebarWidth, rightPanelWidth, chatHeight]);
 
   const startDragging = (type: "sidebar" | "rightPanel" | "chat", e: React.MouseEvent) => {
     e.preventDefault();
