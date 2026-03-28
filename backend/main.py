@@ -138,8 +138,13 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     try:
         # === Call OpenRouter API for Spec ===
         active_model = models.get("specFactory", "google/gemini-2.5-flash")
-        sys_prompt = "You are the Spec Factory. Take this raw idea and output a strict, 3-bullet-point technical requirement document."
-        spec, usage = await llm.generate(sys_prompt, prompt, model_name=active_model)
+        sys_prompt = """You are the Product Manager (Spec Factory). 
+Generate a comprehensive Product Requirements Document (PRD). You must define:
+1. Core purpose of the project.
+2. All required dependencies and libraries.
+3. Explicitly define the exact file structure required."""
+        
+        spec, usage = await llm.generate(sys_prompt, f"ORIGINAL REQUEST:\n{prompt}", model_name=active_model)
         
         # Broadcast the generated spec
         await websocket.send_json({
@@ -171,8 +176,14 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Planning architecture and layout...", "stage": "planner"})
     try:
         active_model = models.get("planner", "google/gemini-2.5-flash")
-        sys_prompt = "You are the Planner. Based on the spec, outline the architecture layout, the list of files to create, and a brief step-by-step plan. Be concise."
-        plan, usage = await llm.generate(sys_prompt, spec, model_name=active_model)
+        sys_prompt = """You are a Senior Systems Architect (Planner). 
+Take the Spec and write out the exact, function-by-function pseudo-code and data flow for every single file.
+Define exactly how the files import and interact with each other."""
+        
+        # Accumulate payload
+        user_prompt = f"ORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}"
+        
+        plan, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
         await websocket.send_json({
             "event": "chat", "sender": "swarm", "text": plan, "stage": "planner", 
             "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
@@ -187,22 +198,52 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     await websocket.send_json({"event": "station_update", "station": "executor", "status": "active"})
     await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Writing code natively...", "stage": "executor"})
     try:
+        # Flatten workspace list to inject environment context
+        def flatten_files(node_list, path=""):
+            res = []
+            for item in node_list:
+                full_path = path + item["name"]
+                if item.get("is_dir"):
+                    res.extend(flatten_files(item.get("children", []), full_path + "/"))
+                else:
+                    res.append(full_path)
+            return res
+            
+        existing_files = flatten_files(fs_manager.list_files())
+        existing_files_str = "\n".join(existing_files) if existing_files else "No files exist currently."
+
         active_model = models.get("executor", "anthropic/claude-3-haiku")
-        sys_prompt = """You are the Executor. Based on the spec and plan, write the full code. 
+        sys_prompt = """You are a junior syntax translator (Executor).
+Read the exhaustive Plan and translate it directly into code.
 IMPORTANT: Output each file exactly in this format so the system can extract it:
 <file path="filename.ext">
 ...code...
 </file>
 Do not use markdown code blocks inside the <file> tag, just raw code."""
-        code_output, usage = await llm.generate(sys_prompt, f"SPEC:\n{spec}\n\nPLAN:\n{plan}", model_name=active_model)
         
-        # Parse output for <file path="...">
+        # Accumulating Payload + Context Injection
+        user_prompt = f"CURRENT WORKSPACE FILES:\n{existing_files_str}\n\nORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}\n\nARCHITECT PLAN:\n{plan}"
+        
+        code_output, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
+        
+        # Robust Regex Extraction: Remove markdown blocks that wrap the <file> tags
         import re
-        file_matches = list(re.finditer(r'<file\s+path=["\']([^"\']+)["\']>\n?(.*?)\n?</file>', code_output, re.DOTALL))
+        clean_output = code_output
+        clean_output = re.sub(r'```[a-zA-Z]*\n(<file)', r'\1', clean_output)
+        clean_output = re.sub(r'(</file>)\n```', r'\1', clean_output)
+        
+        file_matches = list(re.finditer(r'<file\s+path=["\']([^"\']+)["\']>\n?(.*?)\n?</file>', clean_output, re.DOTALL))
         saved_files = []
         for match in file_matches:
             path = match.group(1).strip()
             content = match.group(2)
+            
+            # Additional safety: gracefully strip markdown ticks inside the content if the LLM mistakenly injects them
+            content = content.strip()
+            if content.startswith("```"):
+                content = re.sub(r'^```[a-zA-Z]*\n', '', content)
+                content = re.sub(r'\n```$', '', content)
+                
             # Ensure directories exist
             dir_path = os.path.dirname(os.path.join(fs_manager.workspace_path, path))
             os.makedirs(dir_path, exist_ok=True)
