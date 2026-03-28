@@ -1,6 +1,8 @@
+"use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useMonaco } from "@monaco-editor/react";
 import {
   Sparkles,
   Shield,
@@ -107,7 +109,7 @@ declare global {
 
 import Editor from "@monaco-editor/react";
 
-export default function App() {
+export function FlowmindIDE() {
 
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [fileContentsCache, setFileContentsCache] = useState<Record<string, string>>({});
@@ -117,6 +119,34 @@ export default function App() {
     planner: "idle",
     executor: "idle",
   });
+
+  const monaco = useMonaco();
+
+  useEffect(() => {
+    if (monaco) {
+      monaco.editor.defineTheme('cyberpunk', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'string', foreground: 'fbbf24' },
+          { token: 'comment', foreground: '34d39999', fontStyle: 'italic' },
+          { token: 'keyword', foreground: 'a855f7' },
+          { token: 'identifier', foreground: 'cccccc' },
+          { token: 'type.identifier', foreground: '34d399' },
+          { token: 'function', foreground: '22d3ee' },
+        ],
+        colors: {
+          'editor.background': '#0a0a0f',
+          'editor.foreground': '#cccccc',
+          'editor.lineHighlightBackground': '#22d3ee0d',
+          'editorLineNumber.foreground': '#22d3ee4d',
+          'editorLineNumber.activeForeground': '#22d3ee99',
+          'editorIndentGuide.background': '#22d3ee1a',
+        }
+      });
+      monaco.editor.setTheme('cyberpunk');
+    }
+  }, [monaco]);
 
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     originToSpec: false,
@@ -142,6 +172,7 @@ export default function App() {
   // Drag state
   const [isDragging, setIsDragging] = useState<"sidebar" | "rightPanel" | "chat" | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, value: 0 });
+
   useEffect(() => {
     let ws: WebSocket;
     const connect = () => {
@@ -158,14 +189,14 @@ export default function App() {
           const processFiles = (list: any[]): FileItem[] => {
             return list.map((f: any) => ({
                name: f.name,
-               type: f.is_dir ? ("folder" as const) : ("file" as const),
+               type: f.is_dir ? "folder" as any : "file" as any,
                children: [], 
                expanded: false
             }));
           };
           setFiles([{
             name: "Active Workspace",
-            type: "folder" as const,
+            type: "folder" as any,
             expanded: true,
             children: processFiles(data.files || [])
           }]);
@@ -173,7 +204,7 @@ export default function App() {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
         } else if (data.event === "chat") {
-          setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? ("agent" as const) : ("user" as const), content: data.text, stage: data.stage }]);
+          setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage }]);
         } else if (data.event === "monaco_update") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
@@ -195,9 +226,7 @@ export default function App() {
           setConnectionState({ originToSpec: false, specToPlanner: false, plannerToExecutor: false });
         } else if (data.event === "workflow_complete") {
           setIsSimulating(false);
-          setChatMessages(prev => [...prev, { role: "agent" as const, content: "Swarm workflow complete! Ready for next task." }]);
-        } else if (data.event === "error") {
-          console.error(data.message);
+          setChatMessages(prev => [...prev, { role: "agent" as any, content: "Swarm workflow complete! Ready for next task." }]);
         }
       };
 
@@ -385,18 +414,9 @@ export default function App() {
           <div className="px-3 py-3 border-b border-[#22d3ee]/10">
             <div className="flex items-center gap-2">
               <Terminal className="w-3.5 h-3.5 text-[#22d3ee]" style={{ filter: "drop-shadow(0 0 4px rgba(34,211,238,0.5))" }} />
-              <div className="flex w-full justify-between pr-2 items-center">
-                <span className="text-[10px] font-semibold text-[#22d3ee] uppercase tracking-wider">
-                  WORKSPACE SANDBOX
-                </span>
-                <button
-                  onClick={handleOpenFolder}
-                  className="text-[#22d3ee] hover:text-white"
-                  title="Open Folder"
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <span className="text-[10px] font-semibold text-[#22d3ee] uppercase tracking-wider">
+                Workspace Sandbox
+              </span>
             </div>
           </div>
           <div className="flex-1 overflow-auto px-1 py-2">
@@ -453,10 +473,24 @@ export default function App() {
             
               <Editor
                 height="100%"
-                theme="vs-dark"
+                theme="cyberpunk"
                 path={selectedFile}
                 value={fileContentsCache[selectedFile] || "// Loading..."}
-                options={{ readOnly: true, minimap: { enabled: false }, fontFamily: "Menlo, Monaco, 'Courier New', monospace" }}
+                options={{ 
+                  readOnly: true, 
+                  minimap: { enabled: false }, 
+                  fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+                  fontSize: 13,
+                  lineHeight: 24,
+                  padding: { top: 16, bottom: 16 },
+                  scrollbar: {
+                    vertical: 'hidden',
+                    horizontal: 'hidden'
+                  },
+                  overviewRulerLanes: 0,
+                  hideCursorInOverviewRuler: true,
+                  overviewRulerBorder: false,
+                }}
               />
 
           </div>

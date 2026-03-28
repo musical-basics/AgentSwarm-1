@@ -14,12 +14,14 @@
     "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.10.2",
     "allotment": "^1.20.5",
+    "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

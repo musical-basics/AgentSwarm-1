@@ -50,15 +50,32 @@ WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../work
 fs_manager = FileSystemManager(WORKSPACE_DIR)
 
 async def simulate_swarm_workflow(websocket: WebSocket, msg: str):
-    stations = ["idea", "spec_factory", "planner", "executor"]
+    stations = ["origin", "specFactory", "planner", "executor"]
     
     # Let the UI reset state
     await websocket.send_json({"event": "workflow_start", "message": msg})
     
+    stages = {
+        "origin": "Capturing idea...",
+        "specFactory": "Generating specifications...",
+        "planner": "Planning architecture...",
+        "executor": "Executing implementation..."
+    }
+    
     for station in stations:
         print(f"Starting station: {station}")
         # Active status
-        await websocket.send_json({"event": "station_update", "station": station, "status": "active"})
+        await websocket.send_json({
+            "event": "station_update", 
+            "station": station, 
+            "status": "active"
+        })
+        await websocket.send_json({
+            "event": "chat",
+            "sender": "swarm",
+            "text": stages[station],
+            "stage": station
+        })
         await asyncio.sleep(2)
         
         # Complete status
@@ -114,6 +131,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     await websocket.send_json({"event": "error", "message": str(e)})
 
+            elif command == "set_workspace":
+                new_path = data.get("path")
+                if new_path and os.path.isdir(new_path):
+                    fs_manager.workspace_path = os.path.abspath(new_path)
+                    files = fs_manager.list_files()
+                    await websocket.send_json({"event": "file_list", "files": files})
+                else:
+                    await websocket.send_json({"event": "error", "message": "Invalid directory path"})
+
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")
                 # Spawn simulate async task so websocket is not fully blocked if reading events
@@ -123,4 +149,4 @@ async def websocket_endpoint(websocket: WebSocket):
         print("Client disconnected")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)
