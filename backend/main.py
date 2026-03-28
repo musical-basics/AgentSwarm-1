@@ -2,12 +2,21 @@ import asyncio
 import os
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 load_dotenv(".env.local")
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class LLMEngine:
     def __init__(self, api_key: str):
@@ -71,19 +80,31 @@ class FileSystemManager:
         safe_path = self._get_safe_path(relative_path)
         if not os.path.exists(safe_path) or not os.path.isdir(safe_path):
             return []
-        
-        tree = []
-        for item in os.listdir(safe_path):
-            item_path = os.path.join(safe_path, item)
-            is_dir = os.path.isdir(item_path)
-            if item.startswith('.'):
-                continue
-            tree.append({
-                "name": item,
-                "path": os.path.relpath(item_path, self.workspace_path),
-                "is_dir": is_dir
-            })
-        return tree
+            
+        def build_tree(current_dir):
+            tree = []
+            for item in os.listdir(current_dir):
+                if item.startswith('.'):
+                    continue
+                item_path = os.path.join(current_dir, item)
+                is_dir = os.path.isdir(item_path)
+                
+                node = {
+                    "name": item,
+                    "path": os.path.relpath(item_path, self.workspace_path),
+                    "is_dir": is_dir
+                }
+                
+                if is_dir:
+                    node["children"] = build_tree(item_path)
+                    
+                tree.append(node)
+                
+            # Sort folders first, then files
+            tree.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            return tree
+            
+        return build_tree(safe_path)
 
     def read_file(self, relative_path: str) -> str:
         safe_path = self._get_safe_path(relative_path)

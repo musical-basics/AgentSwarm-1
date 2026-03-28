@@ -234,22 +234,39 @@ export function FlowmindIDE() {
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.event === "file_list") {
-          const processFiles = (list: any[]): FileItem[] => {
-            return list.map((f: any) => ({
-               name: f.name,
-               type: f.is_dir ? "folder" as any : "file" as any,
-               children: [], 
-               expanded: false
-            }));
-          };
-          // Use workspace_name if provided by backend, or default
-          const workspaceName = data.workspace_name || "Active Workspace";
-          setFiles([{
-            name: workspaceName,
-            type: "folder" as any,
-            expanded: true,
-            children: processFiles(data.files || [])
-          }]);
+          setFiles(prev => {
+            const getExpandedFolders = (items: FileItem[], paths: Set<string>, currentPath: string = "") => {
+              for (const item of items) {
+                const itemPath = currentPath ? `${currentPath}/${item.name}` : item.name;
+                if (item.expanded) paths.add(itemPath);
+                if (item.children) getExpandedFolders(item.children, paths, itemPath);
+              }
+              return paths;
+            };
+            const expandedSet = getExpandedFolders(prev, new Set());
+
+            const processFiles = (list: any[], currentPath: string = ""): FileItem[] => {
+              return list.map((f: any) => {
+                const itemPath = currentPath ? `${currentPath}/${f.name}` : f.name;
+                return {
+                  name: f.name,
+                  type: f.is_dir ? "folder" as any : "file" as any,
+                  children: f.children ? processFiles(f.children, itemPath) : [], 
+                  expanded: expandedSet.has(itemPath) || f.name === "_swarm_artifacts"
+                };
+              });
+            };
+            
+            const workspaceName = data.workspace_name || "Active Workspace";
+            const rootExpanded = prev.length > 0 ? prev[0].expanded : true;
+            
+            return [{
+              name: workspaceName,
+              type: "folder" as any,
+              expanded: rootExpanded,
+              children: processFiles(data.files || [], workspaceName)
+            }];
+          });
         } else if (data.event === "config_loaded") {
           if (data.config) {
              setNodeModels(prev => ({ ...prev, ...data.config }));

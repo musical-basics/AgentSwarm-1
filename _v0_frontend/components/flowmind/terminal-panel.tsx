@@ -33,7 +33,11 @@ export function TerminalPanel() {
     term.loadAddon(fitAddon);
 
     term.open(terminalRef.current);
-    fitAddon.fit();
+    requestAnimationFrame(() => {
+      try {
+        fitAddon.fit();
+      } catch (e) {}
+    });
 
     // Resize observer
     const resizeObserver = new ResizeObserver(() => {
@@ -99,7 +103,9 @@ export function TerminalPanel() {
          <span className="w-2 h-2 rounded-full bg-[#22d3ee] animate-pulse shadow-[0_0_8px_rgba(34,211,238,0.8)]"></span>
          <span className="text-[10px] font-bold text-[#22d3ee] uppercase tracking-wider">Local Terminal</span>
       </div>
-      <div ref={terminalRef} className="w-full flex-1" />
+      <div className="relative flex-1 min-h-0 min-w-0 w-full overflow-hidden">
+        <div ref={terminalRef} className="absolute inset-0" />
+      </div>
     </div>
   );
 }
