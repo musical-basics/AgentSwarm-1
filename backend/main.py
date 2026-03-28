@@ -64,6 +64,7 @@ def save_ide_state(state: dict):
         json.dump(state, f)
 
 active_ws_connections = set()
+active_pty_fds = set()
 
 import time
 from watchdog.observers import Observer
@@ -510,6 +511,46 @@ Use this exact schema:
         })
         files = fs_manager.list_files()
         await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        
+        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Determining execution commands...", "stage": "executor"})
+        runner_sys_prompt = """You are the DevOps Runner.
+Read the architectural plan and generated files. Output the exact bash commands to install dependencies (e.g. pip3 install) and run the main application.
+Output EXACTLY a valid JSON object. DO NOT wrap the JSON in markdown code blocks.
+Schema:
+{
+  "commands": [
+    "pip3 install pygame",
+    "python3 snake_game.py"
+  ]
+}"""
+        runner_user_prompt = f"PLAN:\n{plan}\n\nGENERATED FILES:\n{saved_files}"
+        
+        runner_output, _ = await llm.generate(runner_sys_prompt, runner_user_prompt, model_name=active_model, is_json=True)
+        
+        # Parse JSON
+        import json
+        clean_runner_output = runner_output.strip()
+        if clean_runner_output.startswith("```json"): clean_runner_output = clean_runner_output[7:]
+        elif clean_runner_output.startswith("```"): clean_runner_output = clean_runner_output[3:]
+        if clean_runner_output.endswith("```"): clean_runner_output = clean_runner_output[:-3]
+        
+        try:
+            runner_data = json.loads(clean_runner_output.strip())
+            commands = runner_data.get("commands", [])
+        except Exception:
+            commands = []
+            
+        if commands and active_pty_fds:
+            cmd_str = " && ".join(commands) + "\n"
+            for pty_fd in active_pty_fds:
+                try:
+                    os.write(pty_fd, cmd_str.encode('utf-8'))
+                except Exception:
+                    pass
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Running in Local Terminal:\n\n`{cmd_str.strip()}`", "stage": "executor"})
+        elif commands:
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"No active Local Terminal. Please run:\n\n`{' && '.join(commands)}`", "stage": "executor"})
+            
     except Exception as e:
         await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Executor Error: {str(e)}", "stage": "executor"})
 
@@ -694,6 +735,7 @@ async def pty_endpoint(websocket: WebSocket):
     import asyncio
     
     pid, fd = pty.fork()
+    active_pty_fds.add(fd)
     
     if pid == 0:
         os.chdir(fs_manager.workspace_path)
@@ -753,6 +795,7 @@ async def pty_endpoint(websocket: WebSocket):
         except (asyncio.CancelledError, WebSocketDisconnect, Exception):
             pass
         finally:
+            active_pty_fds.discard(fd)
             # CRITICAL: Prevent Zombie Processes
             try:
                 os.kill(pid, signal.SIGKILL)
