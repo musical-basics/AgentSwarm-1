@@ -22,6 +22,7 @@ import {
   GitBranch,
   GripVertical,
   GripHorizontal,
+  Save,
 } from "lucide-react";
 
 type NodeStatus = "idle" | "active" | "complete";
@@ -50,6 +51,11 @@ interface ChatMessage {
   role: "user" | "agent";
   content: string;
   stage?: string;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    model: string;
+  };
 }
 
 const initialFiles: FileItem[] = [
@@ -163,6 +169,26 @@ export function FlowmindIDE() {
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const [modelOptions, setModelOptions] = useState<{id: string, name: string, pricing?: any}[]>([]);
+  const [nodeModels, setNodeModels] = useState({
+    origin: "google/gemini-2.5-flash",
+    specFactory: "anthropic/claude-3-haiku",
+    planner: "google/gemini-2.5-flash",
+    executor: "anthropic/claude-3-haiku",
+  });
+
+  useEffect(() => {
+    fetch("https://openrouter.ai/api/v1/models")
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.data) {
+          const sorted = data.data.sort((a: any, b: any) => a.name.localeCompare(b.name));
+          setModelOptions(sorted);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
   // Resizable panel state
   const [sidebarWidth, setSidebarWidth] = useState(256);
   const [rightPanelWidth, setRightPanelWidth] = useState(480);
@@ -194,17 +220,23 @@ export function FlowmindIDE() {
                expanded: false
             }));
           };
+          // Use workspace_name if provided by backend, or default
+          const workspaceName = data.workspace_name || "Active Workspace";
           setFiles([{
-            name: "Active Workspace",
+            name: workspaceName,
             type: "folder" as any,
             expanded: true,
             children: processFiles(data.files || [])
           }]);
+        } else if (data.event === "config_loaded") {
+          if (data.config) {
+             setNodeModels(prev => ({ ...prev, ...data.config }));
+          }
         } else if (data.event === "file_content") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
         } else if (data.event === "chat") {
-          setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage }]);
+          setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage, usage: data.usage }]);
         } else if (data.event === "monaco_update") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
@@ -310,7 +342,7 @@ export function FlowmindIDE() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (chatInput.trim() && !isSimulating) {
-      if (socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim() }));
+      if (socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels }));
       setChatInput("");
     }
   };
@@ -552,46 +584,80 @@ export function FlowmindIDE() {
 
             {/* Workflow Graph */}
             <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
-              {/* Simulate Button */}
-              <motion.button
-                onClick={() => { if (chatInput.trim() && socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim() })); else alert("Type a message to simulate swarm"); }}
-                disabled={isSimulating}
-                className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background: isSimulating 
-                    ? "linear-gradient(135deg, rgba(34,211,238,0.1) 0%, rgba(168,85,247,0.1) 100%)" 
-                    : "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
-                  border: "1px solid rgba(34,211,238,0.5)",
-                  boxShadow: isSimulating 
-                    ? "none" 
-                    : "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
-                  color: "#22d3ee",
-                }}
-                whileHover={!isSimulating ? { 
-                  scale: 1.05,
-                  boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)",
-                } : {}}
-                whileTap={!isSimulating ? { scale: 0.95 } : {}}
-              >
-                <Play className={`w-3.5 h-3.5 ${isSimulating ? "animate-spin" : ""}`} />
-                {isSimulating ? "Simulating..." : "Simulate Swarm"}
-              </motion.button>
+              {/* Top Action Buttons */}
+              <div className="absolute top-4 right-4 flex items-center gap-3 z-30">
+                <motion.button
+                  onClick={() => {
+                    if (socket) {
+                      socket.send(JSON.stringify({ command: "save_config", config: nodeModels }));
+                      setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration to swarm_config.json" }]);
+                    } else {
+                      alert("Not connected to backend");
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                  style={{
+                    background: "rgba(34,211,238,0.1)",
+                    border: "1px solid rgba(34,211,238,0.3)",
+                    color: "#22d3ee",
+                  }}
+                  whileHover={{ 
+                    scale: 1.05,
+                    backgroundColor: "rgba(34,211,238,0.2)",
+                    boxShadow: "0 0 15px rgba(34,211,238,0.3)",
+                  }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save Config
+                </motion.button>
+
+                <motion.button
+                  onClick={() => { if (chatInput.trim() && socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels })); else alert("Type a message to simulate swarm"); }}
+                  disabled={isSimulating}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    background: isSimulating 
+                      ? "linear-gradient(135deg, rgba(34,211,238,0.1) 0%, rgba(168,85,247,0.1) 100%)" 
+                      : "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
+                    border: "1px solid rgba(34,211,238,0.5)",
+                    boxShadow: isSimulating 
+                      ? "none" 
+                      : "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
+                    color: "#22d3ee",
+                  }}
+                  whileHover={!isSimulating ? { 
+                    scale: 1.05,
+                    boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)",
+                  } : {}}
+                  whileTap={!isSimulating ? { scale: 0.95 } : {}}
+                >
+                  <Play className={`w-3.5 h-3.5 ${isSimulating ? "animate-spin" : ""}`} />
+                  {isSimulating ? "Simulating..." : "Simulate Swarm"}
+                </motion.button>
+              </div>
 
               {/* Top Row: Origin and Spec */}
-              <div className="flex items-center gap-4 mb-6">
-                <WorkflowNode
-                  title="THE ORIGIN"
-                  status={nodeState.origin}
-                  color="cyan"
-                  icon={<SparkIcon status={nodeState.origin} />}
-                />
+              <div className="flex items-center gap-4 mb-6 mt-8">
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="THE ORIGIN"
+                    status={nodeState.origin}
+                    color="cyan"
+                    icon={<SparkIcon status={nodeState.origin} />}
+                  />
+                </div>
                 <ConnectionLine active={connectionState.originToSpec} />
-                <WorkflowNode
-                  title="SPEC FACTORY"
-                  status={nodeState.specFactory}
-                  color="purple"
-                  icon={<ArmoredSparkIcon status={nodeState.specFactory} />}
-                />
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.specFactory} onChange={v => setNodeModels(p => ({...p, specFactory: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="SPEC FACTORY"
+                    status={nodeState.specFactory}
+                    color="purple"
+                    icon={<ArmoredSparkIcon status={nodeState.specFactory} />}
+                  />
+                </div>
               </div>
 
               {/* Vertical connection */}
@@ -600,20 +666,26 @@ export function FlowmindIDE() {
               </div>
 
               {/* Bottom Row: Planner and Executor */}
-              <div className="flex items-center gap-4">
-                <WorkflowNode
-                  title="PLANNER"
-                  status={nodeState.planner}
-                  color="emerald"
-                  icon={<TeamIcon status={nodeState.planner} />}
-                />
+              <div className="flex items-center gap-4 mt-8">
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.planner} onChange={v => setNodeModels(p => ({...p, planner: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="PLANNER"
+                    status={nodeState.planner}
+                    color="emerald"
+                    icon={<TeamIcon status={nodeState.planner} />}
+                  />
+                </div>
                 <ConnectionLine active={connectionState.plannerToExecutor} />
-                <WorkflowNode
-                  title="EXECUTOR"
-                  status={nodeState.executor}
-                  color="amber"
-                  icon={<CodeIcon status={nodeState.executor} />}
-                />
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.executor} onChange={v => setNodeModels(p => ({...p, executor: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="EXECUTOR"
+                    status={nodeState.executor}
+                    color="amber"
+                    icon={<CodeIcon status={nodeState.executor} />}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -654,7 +726,7 @@ export function FlowmindIDE() {
             {/* Messages */}
             <div className="flex-1 overflow-auto p-3 space-y-2 min-h-0">
               {chatMessages.map((msg, i) => (
-                <ChatBubble key={i} message={msg} />
+                <ChatBubble key={i} message={msg} modelOptions={modelOptions} />
               ))}
               <div ref={chatEndRef} />
             </div>
@@ -889,6 +961,31 @@ function PythonLine({ line }: { line: string }) {
         );
       })}
     </>
+  );
+}
+
+// Model Selector Dropdown
+function NodeModelSelector({ 
+  value, 
+  onChange, 
+  options 
+}: { 
+  value: string; 
+  onChange: (val: string) => void; 
+  options: {id: string, name: string, pricing?: any}[] 
+}) {
+  return (
+    <div className="absolute -top-7 left-1/2 -translate-x-1/2 w-full min-w-[140px] max-w-[220px] px-2 z-20">
+      <select 
+        value={value} 
+        onChange={e => onChange(e.target.value)}
+        className="w-full text-[11px] bg-[#12121a] text-[#cccccc] border border-[#22d3ee]/30 rounded px-1.5 py-1 outline-none cursor-pointer hover:border-[#22d3ee]/60 transition-colors"
+        style={{ boxShadow: "0 0 10px rgba(0,0,0,0.5)" }}
+      >
+        <option value="">Default Model...</option>
+        {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </div>
   );
 }
 
@@ -1278,21 +1375,38 @@ function CodeIcon({ status }: { status: NodeStatus }) {
 }
 
 // Chat Bubble with Stage Colors
-function ChatBubble({ message }: { message: ChatMessage }) {
+function ChatBubble({ 
+  message, 
+  modelOptions = [] 
+}: { 
+  message: ChatMessage; 
+  modelOptions?: {id: string, name: string, pricing?: any}[] 
+}) {
   const stageColors: Record<string, { color: string; glow: string }> = {
     origin: { color: "#22d3ee", glow: "0 0 10px rgba(34,211,238,0.3)" },
-    spec: { color: "#a855f7", glow: "0 0 10px rgba(168,85,247,0.3)" },
+    specFactory: { color: "#a855f7", glow: "0 0 10px rgba(168,85,247,0.3)" },
     planner: { color: "#34d399", glow: "0 0 10px rgba(52,211,153,0.3)" },
     executor: { color: "#fbbf24", glow: "0 0 10px rgba(251,191,36,0.3)" },
   };
 
   const stageStyle = message.stage ? stageColors[message.stage] : null;
 
+  let costStr = "";
+  if (message.usage && message.usage.model) {
+    const modelInfo = modelOptions.find(m => m.id === message.usage?.model);
+    if (modelInfo && modelInfo.pricing) {
+      const pCost = message.usage.prompt_tokens * parseFloat(modelInfo.pricing.prompt);
+      const cCost = message.usage.completion_tokens * parseFloat(modelInfo.pricing.completion);
+      const total = pCost + cCost;
+      if (!isNaN(total)) costStr = `Cost: $${total.toFixed(6)}`;
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`text-xs ${message.role === "user" ? "text-right" : ""}`}
+      className={`text-xs ${message.role === "user" ? "text-right" : "text-left"}`}
     >
       {message.role === "user" ? (
         <span 
@@ -1305,7 +1419,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           {message.content}
         </span>
       ) : (
-        <span
+        <div
           className="inline-block"
           style={{ color: stageStyle?.color || "#808080" }}
         >
@@ -1317,8 +1431,17 @@ function ChatBubble({ message }: { message: ChatMessage }) {
               transition={{ duration: 0.6, repeat: Infinity }}
             />
           )}
-          {message.content}
-        </span>
+          <span>{message.content}</span>
+          
+          {message.usage && (
+            <div className="mt-2 pt-2 border-t border-[#808080]/20 flex flex-wrap items-center gap-3 text-[9px] font-mono">
+              <span className="text-[#34d399]">In: {message.usage.prompt_tokens}</span>
+              <span className="text-[#a855f7]">Out: {message.usage.completion_tokens}</span>
+              {costStr && <span className="text-[#fbbf24]">{costStr}</span>}
+              <span className="text-[#808080]/60 ml-auto break-all">{message.usage.model}</span>
+            </div>
+          )}
+        </div>
       )}
     </motion.div>
   );

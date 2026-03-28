@@ -21,7 +21,11 @@
       "**/.gitignore",
       "**/pnpm-lock.yaml",
       "repomix.xml",
-      "repomix-instruction.md"
+      "repomix-instruction.md",
+      "frontend/**",
+      "_v0_frontend/components/ui/**",
+      "**/.next/**",
+      "**/out/**"
     ]
   }
 }
