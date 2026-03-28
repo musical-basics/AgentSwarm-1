@@ -6,6 +6,19 @@ const os = require('os');
 let mainWindow = null;
 let pythonProcess = null;
 
+function killPort(port) {
+  try {
+    const { execSync } = require('child_process');
+    const pid = execSync(`lsof -ti:${port} 2>/dev/null`, { encoding: 'utf8' }).trim();
+    if (pid) {
+      execSync(`kill -9 ${pid} 2>/dev/null`, { encoding: 'utf8' });
+      console.log(`Killed stale process on port ${port} (PID: ${pid})`);
+    }
+  } catch (e) {
+    // No process on that port, or kill failed — safe to ignore
+  }
+}
+
 function createPythonBackend() {
   const isDev = process.env.ELECTRON_IS_DEV === '1';
   // Point to the root backend/main.py
@@ -20,6 +33,9 @@ function createPythonBackend() {
   const fs = require('fs');
   const pythonExecutable = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python3';
 
+  // Kill any stale process on our port before starting
+  killPort(6500);
+
   // Start the FastAPI backend
   pythonProcess = spawn(pythonExecutable, [scriptPath], {
     cwd: path.dirname(scriptPath),
@@ -30,6 +46,8 @@ function createPythonBackend() {
     console.log(`Python backend exited with code ${code}`);
   });
 }
+
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({

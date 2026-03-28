@@ -519,4 +519,4 @@ async def pty_endpoint(websocket: WebSocket):
                 print(f"Cleanup error for PTY {pid}: {e}")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8765, reload=False)
+    uvicorn.run("main:app", host="127.0.0.1", port=6500, reload=False)

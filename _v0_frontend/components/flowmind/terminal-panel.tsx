@@ -56,7 +56,7 @@ export function TerminalPanel() {
 
     // WebSocket connect
     const connect = () => {
-      const ws = new WebSocket("ws://127.0.0.1:8765/pty");
+      const ws = new WebSocket("ws://127.0.0.1:6500/pty");
       wsRef.current = ws;
 
       ws.onopen = () => {

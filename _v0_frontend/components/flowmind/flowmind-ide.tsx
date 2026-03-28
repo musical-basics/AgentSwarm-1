@@ -230,7 +230,7 @@ export function FlowmindIDE() {
   useEffect(() => {
     let ws: WebSocket;
     const connect = () => {
-      ws = new WebSocket("ws://127.0.0.1:8765/ws");
+      ws = new WebSocket("ws://127.0.0.1:6500/ws");
       ws.onopen = () => {
         console.log("Connected to backend");
         setSocket(ws);
