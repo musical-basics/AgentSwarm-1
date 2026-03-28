@@ -59,6 +59,7 @@ interface ChatMessage {
     completion_tokens: number;
     model: string;
   };
+  commands?: { cmd: string; output: string }[];
 }
 
 const initialFiles: FileItem[] = [
@@ -178,6 +179,11 @@ export function FlowmindIDE() {
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Agent Chat model selector
+  const [chatAgentCompany, setChatAgentCompany] = useState("google");
+  const [chatAgentModel, setChatAgentModel] = useState("google/gemini-2.5-flash");
+  const [isChatTyping, setIsChatTyping] = useState(false);
+
   const [modelOptions, setModelOptions] = useState<any[]>([]);
   const [nodeModels, setNodeModels] = useState({
     origin: "google/gemini-2.5-flash",
@@ -281,6 +287,23 @@ export function FlowmindIDE() {
         } else if (data.event === "file_content") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
+        } else if (data.event === "agent_chat_typing") {
+          setIsChatTyping(true);
+        } else if (data.event === "agent_chat_response") {
+          setIsChatTyping(false);
+          const text = data.text || "";
+          // Strip <cmd>...</cmd> tags from display text — show them as separate blocks
+          const cleanText = text.replace(/<cmd>[\s\S]*?<\/cmd>/g, "").trim();
+          setChatMessages(prev => [
+            ...prev,
+            {
+              role: "agent" as any,
+              content: cleanText,
+              stage: "assistant",
+              usage: data.usage ? { ...data.usage, model: data.model } : undefined,
+              commands: data.commands,
+            }
+          ]);
         } else if (data.event === "chat") {
           setChatMessages(prev => [...prev, { role: data.sender === "swarm" ? "agent" as any : "user" as any, content: data.text, stage: data.stage, usage: data.usage }]);
         } else if (data.event === "monaco_update") {
@@ -399,8 +422,19 @@ export function FlowmindIDE() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (chatInput.trim() && !isSimulating) {
-      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels }));
+    if (chatInput.trim() && !isChatTyping) {
+      const userMsg = chatInput.trim();
+      // Add user message to chat
+      setChatMessages(prev => [...prev, { role: "user" as any, content: userMsg }]);
+      // Send to backend as direct agent chat
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          command: "chat_message",
+          message: userMsg,
+          model: chatAgentModel,
+          history: chatMessages.slice(-10).map(m => ({ role: m.role, content: m.content })),
+        }));
+      }
       setChatInput("");
     }
   };
@@ -897,14 +931,37 @@ export function FlowmindIDE() {
             {/* Glowing edge */}
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#22d3ee]/50 to-transparent" />
             
-            <div className="px-4 py-2.5 border-b border-[#22d3ee]/20 flex items-center gap-2 bg-gradient-to-r from-[#22d3ee]/10 via-transparent to-transparent shrink-0">
-              <motion.div
-                animate={{ scale: [1, 1.2, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
+            <div className="px-3 py-2 border-b border-[#22d3ee]/20 flex items-center gap-2 bg-gradient-to-r from-[#22d3ee]/10 via-transparent to-transparent shrink-0 flex-wrap">
+              <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 1.5, repeat: Infinity }}>
                 <Zap className="w-3.5 h-3.5 text-[#22d3ee]" style={{ filter: "drop-shadow(0 0 4px rgba(34,211,238,0.5))" }} />
               </motion.div>
-              <span className="text-[10px] font-bold text-[#22d3ee] uppercase tracking-wider">Agent Chat (Control)</span>
+              <span className="text-[10px] font-bold text-[#22d3ee] uppercase tracking-wider">Agent Chat</span>
+              
+              {/* Company selector */}
+              <select
+                value={chatAgentCompany}
+                onChange={(e) => {
+                  setChatAgentCompany(e.target.value);
+                  const first = modelOptions.filter(m => m.id.startsWith(e.target.value + "/"))[0];
+                  if (first) setChatAgentModel(first.id);
+                }}
+                className="ml-auto text-[10px] bg-[#0d0d12] border border-[#22d3ee]/30 rounded px-2 py-1 text-[#cccccc] outline-none hover:border-[#22d3ee]/60 transition-colors"
+              >
+                {[...new Set(modelOptions.map(m => m.id.split("/")[0]))].sort().map(c => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+              
+              {/* Model selector */}
+              <select
+                value={chatAgentModel}
+                onChange={(e) => setChatAgentModel(e.target.value)}
+                className="text-[10px] bg-[#0d0d12] border border-[#22d3ee]/30 rounded px-2 py-1 text-[#cccccc] outline-none hover:border-[#22d3ee]/60 transition-colors max-w-[130px] truncate"
+              >
+                {modelOptions.filter(m => m.id.startsWith(chatAgentCompany + "/")).map(m => (
+                  <option key={m.id} value={m.id} title={m.name}>{m.name?.replace(/^.*?\//, "").slice(0, 22) || m.id}</option>
+                ))}
+              </select>
             </div>
 
             {/* Messages */}
@@ -912,6 +969,15 @@ export function FlowmindIDE() {
               {chatMessages.map((msg, i) => (
                 <ChatBubble key={i} message={msg} modelOptions={modelOptions} />
               ))}
+              {/* Typing indicator */}
+              {isChatTyping && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 text-[10px] text-[#22d3ee]/60">
+                  <motion.span animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} className="w-1.5 h-1.5 rounded-full bg-[#22d3ee]/60" />
+                  <motion.span animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} className="w-1.5 h-1.5 rounded-full bg-[#22d3ee]/60" />
+                  <motion.span animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} className="w-1.5 h-1.5 rounded-full bg-[#22d3ee]/60" />
+                  <span>thinking...</span>
+                </motion.div>
+              )}
               <div ref={chatEndRef} />
             </div>
 
@@ -925,9 +991,9 @@ export function FlowmindIDE() {
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask agent to build something..."
+                  placeholder="Ask your AI assistant..."
                   className="flex-1 bg-transparent outline-none text-xs placeholder:text-[#404040] text-[#cccccc]"
-                  disabled={isSimulating}
+                  disabled={isChatTyping}
                 />
                 <motion.button
                   type="submit"
@@ -1702,6 +1768,21 @@ function ChatBubble({
           )}
           <span>{message.content}</span>
           
+          {/* Command outputs */}
+          {message.commands && message.commands.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {message.commands.map((c, i) => (
+                <div key={i} className="rounded-md overflow-hidden border border-[#22d3ee]/20" style={{ background: "rgba(0,0,0,0.4)" }}>
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-[#0d0d12] border-b border-[#22d3ee]/10">
+                    <span className="text-[#22d3ee] text-[9px]">$</span>
+                    <span className="text-[9px] font-mono text-[#34d399]">{c.cmd}</span>
+                  </div>
+                  <pre className="text-[9px] font-mono text-[#cccccc]/80 p-2 whitespace-pre-wrap break-all max-h-32 overflow-auto">{c.output}</pre>
+                </div>
+              ))}
+            </div>
+          )}
+
           {message.usage && (
             <div className="mt-2 pt-2 border-t border-[#808080]/20 flex flex-wrap items-center gap-3 text-[9px] font-mono">
               <span className="text-[#34d399]">In: {message.usage.prompt_tokens}</span>

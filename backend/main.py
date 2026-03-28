@@ -123,7 +123,98 @@ fs_manager = FileSystemManager(WORKSPACE_DIR)
 
 llm = LLMEngine(os.getenv("OPENROUTER_API_KEY", ""))
 
+import re
+import subprocess
+
+async def execute_agent_chat(websocket: WebSocket, message: str, model: str, history: list, fs_mgr: FileSystemManager):
+    """Direct AI chat agent with sandboxed terminal command execution."""
+    workspace = fs_mgr.workspace_path
+
+    system_prompt = f"""You are a helpful AI coding assistant embedded in the Flowmind IDE.
+The user's current workspace is at: {workspace}
+You can run shell commands inside the workspace sandbox by embedding them like this: <cmd>your shell command</cmd>
+Rules:
+- Commands are executed with cwd set to the workspace directory.
+- Never access paths outside the workspace.
+- Only run commands that are safe and relevant to the user's request.
+- After running a command, interpret the output naturally and explain what happened.
+- You can run multiple commands in one response if needed.
+- If the user asks you to create, edit, or run files, do it via commands.
+"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    # Include last 10 turns of history for context
+    for h in history[-10:]:
+        role = h.get("role", "user")
+        if role == "agent":
+            role = "assistant"
+        messages.append({"role": role, "content": h.get("content", "")})
+    messages.append({"role": "user", "content": message})
+
+    # Stream typing indicator
+    await websocket.send_json({"event": "agent_chat_typing", "model": model})
+
+    try:
+        response = await llm.client.chat.completions.create(
+            extra_headers={"HTTP-Referer": "http://localhost:6500", "X-Title": "Flowmind IDE"},
+            model=model,
+            messages=messages,
+            max_tokens=4000,
+        )
+        text = response.choices[0].message.content or ""
+        usage = response.usage
+    except Exception as e:
+        await websocket.send_json({
+            "event": "agent_chat_response",
+            "text": f"⚠️ API Error: {str(e)}",
+            "commands": [],
+            "model": model,
+        })
+        return
+
+    # Parse <cmd>...</cmd> blocks and execute them
+    cmd_pattern = re.compile(r'<cmd>(.*?)</cmd>', re.DOTALL)
+    commands_found = cmd_pattern.findall(text)
+    command_results = []
+
+    for cmd_str in commands_found:
+        cmd_str = cmd_str.strip()
+        # Security: reject any cd or path traversal attempts outside workspace
+        if ".." in cmd_str or cmd_str.startswith("/"):
+            command_results.append({"cmd": cmd_str, "output": "⛔ Blocked: command attempts to access outside workspace."})
+            continue
+        try:
+            result = subprocess.run(
+                cmd_str,
+                shell=True,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "HOME": workspace}
+            )
+            output = (result.stdout + result.stderr).strip() or "(no output)"
+            command_results.append({"cmd": cmd_str, "output": output})
+        except subprocess.TimeoutExpired:
+            command_results.append({"cmd": cmd_str, "output": "⚠️ Command timed out after 30s."})
+        except Exception as e:
+            command_results.append({"cmd": cmd_str, "output": f"⚠️ Error: {str(e)}"})
+
+    # Refresh file tree if any commands ran (they might have created files)
+    if command_results:
+        files = fs_mgr.list_files()
+        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(workspace)})
+
+    await websocket.send_json({
+        "event": "agent_chat_response",
+        "text": text,
+        "commands": command_results,
+        "model": model,
+        "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else {},
+    })
+
 async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
+
     # Let the UI reset state
     await websocket.send_json({"event": "workflow_start", "message": prompt})
     
@@ -415,6 +506,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = data.get("message", "Build something")
                 models_dict = data.get("models", {})
                 asyncio.create_task(execute_live_swarm(websocket, msg, models_dict))
+
+            elif command == "chat_message":
+                msg = data.get("message", "")
+                model = data.get("model", "google/gemini-2.5-flash")
+                history = data.get("history", [])
+                asyncio.create_task(execute_agent_chat(websocket, msg, model, history, fs_manager))
 
             elif command == "rename_file":
                 try:
