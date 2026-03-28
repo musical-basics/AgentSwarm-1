@@ -184,19 +184,24 @@ Rules:
             command_results.append({"cmd": cmd_str, "output": "⛔ Blocked: command attempts to access outside workspace."})
             continue
         try:
-            result = subprocess.run(
+            process = await asyncio.create_subprocess_shell(
                 cmd_str,
-                shell=True,
                 cwd=workspace,
-                capture_output=True,
-                text=True,
-                timeout=30,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "HOME": workspace}
             )
-            output = (result.stdout + result.stderr).strip() or "(no output)"
-            command_results.append({"cmd": cmd_str, "output": output})
-        except subprocess.TimeoutExpired:
-            command_results.append({"cmd": cmd_str, "output": "⚠️ Command timed out after 30s."})
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30.0)
+                output = (stdout.decode() + stderr.decode()).strip() or "(no output)"
+                command_results.append({"cmd": cmd_str, "output": output})
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+                command_results.append({"cmd": cmd_str, "output": "⚠️ Command timed out after 30s. Note: Interactive commands that prompt for user input are not supported here."})
         except Exception as e:
             command_results.append({"cmd": cmd_str, "output": f"⚠️ Error: {str(e)}"})
 
