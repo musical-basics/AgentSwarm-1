@@ -697,7 +697,7 @@ export function FlowmindIDE() {
             </PanelResizeHandle>
             
             <Panel defaultSize={30} minSize={20} className="flex flex-col min-h-0 relative">
-              <TerminalPanel />
+              <TerminalPanel key={files[0]?.name || "default"} />
             </Panel>
           </PanelGroup>
         </div>
