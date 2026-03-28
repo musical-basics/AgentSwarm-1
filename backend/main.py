@@ -56,11 +56,15 @@ class FileSystemManager:
         os.makedirs(self.workspace_path, exist_ok=True)
 
     def _get_safe_path(self, relative_path: str) -> str:
-        # Prevent trailing path traversal
-        normalized = os.path.normpath(relative_path).lstrip("/")
+        # Prevent absolute paths or trailing path traversal
+        if os.path.isabs(relative_path):
+            relative_path = relative_path.lstrip("/")
+        normalized = os.path.normpath(relative_path)
         safe_path = os.path.abspath(os.path.join(self.workspace_path, normalized))
+        
+        # Security hard-stop: Block any path parsing that escapes the workspace boundary
         if not safe_path.startswith(self.workspace_path):
-            raise ValueError("Access denied: Paths outside the workspace are not allowed.")
+            raise ValueError(f"SECURITY ALERT: Access denied. Agent attempted to write to: {safe_path}. Operations are strictly sandboxed.")
         return safe_path
 
     def list_files(self, relative_path: str = ""):
@@ -88,6 +92,8 @@ class FileSystemManager:
 
     def write_file(self, relative_path: str, content: str):
         safe_path = self._get_safe_path(relative_path)
+        # Securely build directories inside boundaries
+        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
         with open(safe_path, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -267,9 +273,7 @@ Do not use markdown code blocks inside the <file> tag, just raw code."""
                 content = re.sub(r'^```[a-zA-Z]*\n', '', content)
                 content = re.sub(r'\n```$', '', content)
                 
-            # Ensure directories exist
-            dir_path = os.path.dirname(os.path.join(fs_manager.workspace_path, path))
-            os.makedirs(dir_path, exist_ok=True)
+            # Use fs_manager strictly for boundary-safe recursive writing
             fs_manager.write_file(path, content)
             saved_files.append(path)
             
@@ -371,6 +375,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 except Exception as e:
                     await websocket.send_json({"event": "error", "message": f"Failed to save config: {str(e)}"})
+
+            elif command == "load_config":
+                try:
+                    import json
+                    config_path = os.path.join(fs_manager.workspace_path, "swarm_config.json")
+                    if os.path.exists(config_path):
+                        with open(config_path, "r") as f:
+                            config_data = json.load(f)
+                        await websocket.send_json({"event": "config_loaded", "config": config_data})
+                        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Configuration loaded from workspace.", "stage": "origin"})
+                    else:
+                        await websocket.send_json({"event": "error", "message": "No swarm_config.json found in the current workspace."})
+                except Exception as e:
+                    await websocket.send_json({"event": "error", "message": f"Failed to load config: {str(e)}"})
 
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")

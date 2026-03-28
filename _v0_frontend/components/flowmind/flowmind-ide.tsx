@@ -635,6 +635,31 @@ export function FlowmindIDE() {
                 <motion.button
                   onClick={() => {
                     if (socket) {
+                      socket.send(JSON.stringify({ command: "load_config" }));
+                    } else {
+                      alert("Not connected to backend");
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                  style={{
+                    background: "rgba(34,211,238,0.1)",
+                    border: "1px solid rgba(34,211,238,0.3)",
+                    color: "#22d3ee",
+                  }}
+                  whileHover={{ 
+                    scale: 1.05,
+                    backgroundColor: "rgba(34,211,238,0.2)",
+                    boxShadow: "0 0 15px rgba(34,211,238,0.3)",
+                  }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Open Config
+                </motion.button>
+
+                <motion.button
+                  onClick={() => {
+                    if (socket) {
                       socket.send(JSON.stringify({ command: "save_config", config: nodeModels }));
                       setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration to swarm_config.json" }]);
                     } else {
