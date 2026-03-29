@@ -1,0 +1,24 @@
+2026-03-28 18:53:26,006 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 18:53:58,226 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 18:54:10,281 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 18:54:12,904 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 18:54:14,223 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 18:54:21,701 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 18:54:21,702 - INFO - [Station 3] Starting station: planner
+2026-03-28 18:54:21,702 - INFO - [Station 3] Using planner model: google/gemini-3-flash-preview
+2026-03-28 18:54:21,702 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 18:54:24,325 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 18:54:33,585 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 18:54:33,587 - INFO - [Station 3] Extracting Topological Graph
+2026-03-28 18:54:33,587 - ERROR - CRITICAL SWARM ERROR: name 'json' is not defined
+2026-03-28 18:56:07,936 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled

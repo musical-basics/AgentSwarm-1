@@ -7,6 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+import httpx
 
 load_dotenv(".env.local")
 
@@ -96,6 +97,27 @@ def save_ide_state(state: dict):
 active_ws_connections = set()
 active_pty_fds = set()
 ws_locks = {}
+cached_models = []
+
+async def fetch_openrouter_models():
+    global cached_models
+    if cached_models:
+        return cached_models
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data:
+                    sorted_data = sorted(data["data"], key=lambda x: x.get("name", "").lower())
+                    cached_models = sorted_data
+                    return cached_models
+    except Exception as e:
+        print(f"Failed to fetch models via backend proxy: {e}")
+    return []
 
 async def safe_send(ws: WebSocket, data: dict):
     if ws not in ws_locks:
@@ -883,6 +905,11 @@ async def websocket_endpoint(websocket: WebSocket):
     config_data = get_workspace_config(fs_manager.workspace_path)
     if config_data:
         await safe_send(websocket,{"event": "config_loaded", "config": config_data})
+        
+    # Send models list immediately
+    models = await fetch_openrouter_models()
+    await safe_send(websocket, {"event": "models_list", "models": models})
+    
     try:
         while True:
             data = await websocket.receive_json()
@@ -891,6 +918,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if command == "list_files":
                 files = fs_manager.list_files(data.get("path", ""))
                 await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+                
+            elif command == "get_models":
+                models = await fetch_openrouter_models()
+                await safe_send(websocket, {"event": "models_list", "models": models})
                 
             elif command == "read_file":
                 try:

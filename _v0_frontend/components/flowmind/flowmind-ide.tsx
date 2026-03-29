@@ -225,17 +225,7 @@ export function FlowmindIDE() {
     document.body.removeChild(link);
   };
 
-  useEffect(() => {
-    fetch("https://openrouter.ai/api/v1/models")
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.data) {
-          const sorted = data.data.sort((a: any, b: any) => a.name.localeCompare(b.name));
-          setModelOptions(sorted);
-        }
-      })
-      .catch(console.error);
-  }, []);
+  // Models are now fetched via WebSocket to avoid browser CORS/ratelimits
 
   // Resizable panel state
   const [sidebarWidth, setSidebarWidth] = useState(256);
@@ -294,6 +284,10 @@ export function FlowmindIDE() {
               children: processFiles(data.files || [], workspaceName)
             }];
           });
+        } else if (data.event === "models_list") {
+          if (data.models) {
+            setModelOptions(data.models);
+          }
         } else if (data.event === "config_loaded") {
           if (data.config) {
              setNodeModels(prev => ({ ...prev, ...data.config }));
