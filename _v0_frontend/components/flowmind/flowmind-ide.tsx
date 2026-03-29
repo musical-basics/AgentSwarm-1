@@ -181,6 +181,7 @@ export function FlowmindIDE() {
   });
 
   const [isSimulating, setIsSimulating] = useState(false);
+  const [activeProfile, setActiveProfile] = useState<"enterprise" | "sniper" | "newsroom">("enterprise");
   const [files, setFiles] = useState<FileItem[]>(initialFiles);
   const [selectedFile, setSelectedFile] = useState("hello_swarm.py");
   
@@ -373,6 +374,9 @@ export function FlowmindIDE() {
           setIsSimulating(true);
           setNodeState({ origin: "idle", specFactory: "idle", overseer: "idle", planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" });
           setConnectionState({ originToSpec: false, specToOverseer: false, overseerToPlanner: false, plannerToCommander: false, commanderToExecutor: false, executorToQa: false });
+        } else if (data.event === "load_profile") {
+          setActiveProfile(data.profile);
+          setChatMessages(prev => [...prev, { role: "agent" as any, content: data.message }]);
         } else if (data.event === "workflow_complete") {
           setIsSimulating(false);
           setChatMessages(prev => [...prev, { role: "agent" as any, content: "Swarm workflow complete! Ready for next task." }]);
@@ -985,8 +989,11 @@ export function FlowmindIDE() {
                 )}
               </div>
 
-              {/* Top Row: Origin → Spec Factory */}
-              <div className="flex items-center gap-4 mb-4 mt-28">
+              {/* === ENTERPRISE PROFILE === */}
+              {activeProfile === "enterprise" && (
+                <div className="flex flex-col items-center w-full">
+                  {/* Top Row: Origin → Spec Factory */}
+                  <div className="flex items-center gap-4 mb-4 mt-28">
                 <div className="relative">
                   <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
                   <WorkflowNode
@@ -1108,6 +1115,67 @@ export function FlowmindIDE() {
                   />
                 </div>
               </div>
+                </div>
+              )}
+
+              {/* === SNIPER PROFILE === */}
+              {activeProfile === "sniper" && (
+                <div className="flex flex-col items-center justify-center w-full min-h-[400px]">
+                  <div className="flex flex-wrap justify-center items-center gap-4 mt-20">
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
+                      <WorkflowNode title="THE ORIGIN" status={nodeState.origin} color="cyan" icon={<SparkIcon status={nodeState.origin} />} />
+                    </div>
+                    
+                    <ConnectionLine active={nodeState.origin === "complete"} />
+                    
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
+                      <WorkflowNode title="ONE-SHOT WIZARD" status={nodeState.executor} color="amber" icon={<CodeIcon status={nodeState.executor} />} />
+                    </div>
+
+                    <ConnectionLine active={nodeState.executor === "complete"} />
+                    
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
+                      <WorkflowNode title="QA REVIEWER" status={nodeState.qaReviewer} color="rose" icon={<Shield className="w-5 h-5 text-rose-400" />} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* === NEWSROOM PROFILE === */}
+              {activeProfile === "newsroom" && (
+                <div className="flex flex-col items-center justify-center w-full min-h-[400px]">
+                  <div className="flex flex-wrap justify-center items-center gap-4 mt-20">
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
+                      <WorkflowNode title="THE ORIGIN" status={nodeState.origin} color="cyan" icon={<SparkIcon status={nodeState.origin} />} />
+                    </div>
+                    
+                    <ConnectionLine active={nodeState.origin === "complete"} />
+                    
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.specFactory} onChange={v => setNodeModels(p => ({...p, specFactory: v}))} options={modelOptions} />
+                      <WorkflowNode title="EDITOR-IN-CHIEF" status={nodeState.specFactory} color="purple" icon={<ArmoredSparkIcon status={nodeState.specFactory} />} />
+                    </div>
+
+                    <ConnectionLine active={nodeState.specFactory === "complete"} />
+                    
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
+                      <WorkflowNode title="PROSE WRITER" status={nodeState.executor} color="emerald" icon={<FileText className="w-5 h-5 text-emerald-400" />} />
+                    </div>
+
+                    <ConnectionLine active={nodeState.executor === "complete"} />
+
+                    <div className="relative">
+                      <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
+                      <WorkflowNode title="COPY EDITOR" status={nodeState.qaReviewer} color="rose" icon={<Eye className="w-5 h-5 text-rose-400" />} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div> {/* Closes Swarm Panel */}

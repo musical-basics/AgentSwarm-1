@@ -386,9 +386,62 @@ Rules:
         "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else {},
     })
 
+async def classify_intent(prompt: str, model_id: str) -> str:
+    system_prompt = """
+    Analyze the user prompt and categorize it into exactly one of three profiles:
+    1. "enterprise": Complex software, multiple files, architecture planning.
+    2. "sniper": Single-file scripts, quick code fixes, simple regex, or single functions.
+    3. "newsroom": Creative writing, essays, blog posts, or non-code text generation.
+    
+    Respond ONLY with a JSON object: {"profile": "enterprise" | "sniper" | "newsroom"}
+    """
+    try:
+        res, _ = await llm.generate(system_prompt, prompt, model_name=model_id, is_json=True)
+        # Clean JSON
+        clean_res = res.strip()
+        if clean_res.startswith("```json"): clean_res = clean_res[7:]
+        elif clean_res.startswith("```"): clean_res = clean_res[3:]
+        if clean_res.endswith("```"): clean_res = clean_res[:-3]
+        
+        data = json.loads(clean_res.strip())
+        profile = data.get("profile", "enterprise")
+        if profile not in ["enterprise", "sniper", "newsroom"]:
+            return "enterprise"
+        return profile
+    except Exception as e:
+        logging.error(f"Intent classification failed: {e}")
+        
+    # Fallback to heuristics
+    lower_prompt = prompt.lower()
+    if "essay" in lower_prompt or "blog" in lower_prompt or "post" in lower_prompt:
+        return "newsroom"
+    elif "script" in lower_prompt or "fix" in lower_prompt or "regex" in lower_prompt or "function" in lower_prompt:
+        return "sniper"
+    return "enterprise"
+
 async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: dict = None):
     try:
-        await _execute_live_swarm_logic(websocket, message, models_dict)
+        # Light up origin
+        await safe_send(websocket,{"event": "workflow_start", "message": message})
+        await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "active"})
+        
+        # Dispatch
+        origin_model = models_dict.get("origin", "google/gemini-2.5-flash") if models_dict else "google/gemini-2.5-flash"
+        profile = await classify_intent(message, origin_model)
+        
+        await safe_send(websocket, {
+            "event": "load_profile", 
+            "profile": profile,
+            "message": f"Dispatcher selected [{profile.upper()}] routing."
+        })
+        
+        if profile == "sniper":
+            await run_sniper_loop(websocket, message, models_dict)
+        elif profile == "newsroom":
+            await run_newsroom_loop(websocket, message, models_dict)
+        else:
+            await run_enterprise_loop(websocket, message, models_dict)
+            
     except asyncio.CancelledError:
         logging.info("Swarm execution cancelled by user")
     except Exception as e:
@@ -398,7 +451,7 @@ async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: di
     finally:
         active_swarm_tasks.pop(websocket, None)
 
-async def _execute_live_swarm_logic(websocket: WebSocket, prompt: str, models: dict):
+async def run_enterprise_loop(websocket: WebSocket, prompt: str, models: dict):
 
     # Let the UI reset state
     await safe_send(websocket,{"event": "workflow_start", "message": prompt})
@@ -1274,6 +1327,199 @@ async def pty_endpoint(websocket: WebSocket):
                 os.close(fd)
             except Exception as e:
                 print(f"Cleanup error for PTY {pid}: {e}")
+
+async def run_sniper_loop(websocket: WebSocket, prompt: str, models: dict):
+    # Let the UI reset state
+    await safe_send(websocket,{"event": "workflow_start", "message": prompt})
+    
+    import datetime
+    run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    artifact_dir = f"_swarm_artifacts/{run_timestamp}"
+    os.makedirs(os.path.join(fs_manager.workspace_path, artifact_dir), exist_ok=True)
+    
+    run_costs = {"total_prompt_tokens": 0, "total_completion_tokens": 0, "total_cost_usd": 0.0, "stages": {}}
+
+    def update_run_costs(stage_name: str, model_id: str, usage):
+        payload = calculate_cost_payload(model_id, usage)
+        if not payload: return
+        run_costs["total_prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["total_completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
+        if stage_name not in run_costs["stages"]: run_costs["stages"][stage_name] = {"model": model_id, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
+        run_costs["stages"][stage_name]["prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["stages"][stage_name]["completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["stages"][stage_name]["cost_usd"] += payload.get("total_cost_usd", 0.0)
+        fs_manager.write_file(f"{artifact_dir}/cost_breakdown.json", json.dumps(run_costs, indent=2))
+
+    # --- Origin ---
+    await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🎯 **Sniper Lock-on:** {prompt}", "stage": "origin"})
+    fs_manager.write_file(f"{artifact_dir}/0_origin.md", prompt)
+    files = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+    await asyncio.sleep(0.5)
+    await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "complete"})
+
+    # --- Wizard (Executor) ---
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "🧙 One-Shot Wizard generating file...", "stage": "executor"})
+    
+    wizard_sys = """You are the One-Shot Wizard. Write ONLY the code needed to solve this.
+CRITICAL: Return ONLY a valid JSON object with this schema:
+{"files": [{"path": "relative/file/path.py", "content": "raw code string"}]}"""
+    wizard_user = f"EXISTING FILES:\n{fs_manager.format_all_files()}\n\nTARGET SCRIPT:\n{prompt}"
+    
+    wizard_model = models.get("executorWizard", "google/gemini-2.5-flash")
+    raw_res = ""
+    try:
+        raw_res, usage = await llm.generate(wizard_sys, wizard_user, model_name=wizard_model)
+        update_run_costs("executor_wizard", wizard_model, usage)
+        
+        clean = raw_res.strip()
+        if clean.startswith("```json"): clean = clean[7:]
+        elif clean.startswith("```"): clean = clean[3:]
+        if clean.endswith("```"): clean = clean[:-3]
+        
+        data = json.loads(clean.strip())
+        files_to_write = data.get("files", [])
+        
+        for f in files_to_write:
+            fpath = f.get("path")
+            fcontent = f.get("content")
+            if fpath and fcontent:
+                fs_manager.write_file(fpath, fcontent)
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"✨ Created/Updated: `{fpath}`", "stage": "executor"})
+        
+    except Exception as e:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Wizard Error: {e}", "stage": "executor"})
+        
+    fs_manager.write_file(f"{artifact_dir}/1_wizard.md", raw_res)
+    files = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "complete"})
+    
+    # --- QA Reviewer ---
+    await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "active"})
+    qa_sys = """You are the Code Reviewer. Analyze the generated script for syntax errors, missing imports, or obvious logic bugs. Output markdown text only."""
+    qa_user = f"USER REQUEST: {prompt}\n\nWIZARD OUTPUT:\n{raw_res}"
+    qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
+    
+    try:
+        qa_res, qa_usage = await llm.generate(qa_sys, qa_user, model_name=qa_model)
+        update_run_costs("qa_reviewer", qa_model, qa_usage)
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"**QA Review:**\n{qa_res}", "stage": "qaReviewer"})
+        fs_manager.write_file(f"{artifact_dir}/2_qa.md", qa_res)
+    except Exception as e:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ QA Error: {e}", "stage": "qaReviewer"})
+        
+    await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "complete"})
+    
+    run_costs["total_cost_usd"] = round(run_costs["total_cost_usd"], 5)
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"📊 **Workflow Complete.**\nTarget Eliminated.\nCost: ${run_costs['total_cost_usd']}", "stage": "origin"})
+    await safe_send(websocket,{"event": "workflow_complete"})
+
+
+async def run_newsroom_loop(websocket: WebSocket, prompt: str, models: dict):
+    # Let the UI reset state
+    await safe_send(websocket,{"event": "workflow_start", "message": prompt})
+    
+    import datetime
+    run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    artifact_dir = f"_swarm_artifacts/{run_timestamp}"
+    os.makedirs(os.path.join(fs_manager.workspace_path, artifact_dir), exist_ok=True)
+    
+    run_costs = {"total_prompt_tokens": 0, "total_completion_tokens": 0, "total_cost_usd": 0.0, "stages": {}}
+
+    def update_run_costs(stage_name: str, model_id: str, usage):
+        payload = calculate_cost_payload(model_id, usage)
+        if not payload: return
+        run_costs["total_prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["total_completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
+        if stage_name not in run_costs["stages"]: run_costs["stages"][stage_name] = {"model": model_id, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
+        run_costs["stages"][stage_name]["prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["stages"][stage_name]["completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["stages"][stage_name]["cost_usd"] += payload.get("total_cost_usd", 0.0)
+        fs_manager.write_file(f"{artifact_dir}/cost_breakdown.json", json.dumps(run_costs, indent=2))
+
+    # --- Origin ---
+    await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"📰 **Newsroom Subject:** {prompt}", "stage": "origin"})
+    fs_manager.write_file(f"{artifact_dir}/0_topic.md", prompt)
+    files = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+    await asyncio.sleep(0.5)
+    await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "complete"})
+
+    # --- Editor in Chief (SpecFactory node mapped) ---
+    await safe_send(websocket,{"event": "station_update", "station": "specFactory", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "👓 Editor-in-Chief structuring outline...", "stage": "specFactory"})
+    
+    editor_sys = """You are the Editor-in-Chief. You receive a topic. 
+Write a highly detailed outline and creative brief for the writer. DO NOT WRITE THE ESSAY. Just the sections, tone, and key points."""
+    editor_model = models.get("specFactory", "google/gemini-2.5-flash")
+    
+    editor_res = ""
+    try:
+        editor_res, usage = await llm.generate(editor_sys, prompt, model_name=editor_model)
+        update_run_costs("editor", editor_model, usage)
+        fs_manager.write_file(f"{artifact_dir}/1_outline.md", editor_res)
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"**Outline Approved:**\n{editor_res}", "stage": "specFactory"})
+    except Exception as e:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Editor Error: {e}", "stage": "specFactory"})
+    
+    await safe_send(websocket,{"event": "station_update", "station": "specFactory", "status": "complete"})
+    
+    # --- Prose Writer (Executor node mapped) ---
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "✍️ Writer drafting content...", "stage": "executor"})
+    
+    writer_sys = "You are the Prose Writer. Follow the Editor's outline exactly and write the complete, full-length content in Markdown format. Be beautifully creative and articulate. Under NO CIRCUMSTANCES write JSON or code architectures."
+    writer_user = f"TOPIC: {prompt}\n\nEDITOR OUTLINE:\n{editor_res}"
+    writer_model = models.get("executorWizard", "google/gemini-2.5-flash")
+    
+    writer_res = ""
+    try:
+        writer_res, usage = await llm.generate(writer_sys, writer_user, model_name=writer_model)
+        update_run_costs("writer", writer_model, usage)
+        
+        # Save payload as a markdown file 
+        safe_title = "".join(c if c.isalnum() else "_" for c in prompt[:20]).strip("_").lower()
+        if not safe_title: safe_title = "draft"
+        filepath = f"{safe_title}.md"
+        fs_manager.write_file(filepath, writer_res)
+        fs_manager.write_file(f"{artifact_dir}/2_draft_output.md", writer_res)
+        
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"✒️ Content saved to `{filepath}`", "stage": "executor"})
+        files = fs_manager.list_files()
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+    except Exception as e:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Writer Error: {e}", "stage": "executor"})
+        
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "complete"})
+    
+    # --- Copy Editor (QA node mapped) ---
+    await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "🔍 Copy Editor reviewing draft...", "stage": "qaReviewer"})
+    
+    qa_sys = "You are the Copy Editor. Review the draft for tone, grammar, and alignment with the outline. Provide constructive feedback points. Output markdown."
+    qa_user = f"OUTLINE: {editor_res}\n\nDRAFT:\n{writer_res}"
+    qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
+    
+    try:
+        qa_res, usage = await llm.generate(qa_sys, qa_user, model_name=qa_model)
+        update_run_costs("copy_editor", qa_model, usage)
+        fs_manager.write_file(f"{artifact_dir}/3_copy_edits.md", qa_res)
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"**Review Notes:**\n{qa_res}", "stage": "qaReviewer"})
+    except Exception as e:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Copy Editor Error: {e}", "stage": "qaReviewer"})
+
+    await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "complete"})
+
+    run_costs["total_cost_usd"] = round(run_costs["total_cost_usd"], 5)
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"📰 **Publishing Complete.**\nCost: ${run_costs['total_cost_usd']}", "stage": "origin"})
+    await safe_send(websocket,{"event": "workflow_complete"})
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=6500, reload=False)
