@@ -119,6 +119,29 @@ async def fetch_openrouter_models():
         print(f"Failed to fetch models via backend proxy: {e}")
     return []
 
+def calculate_cost_payload(model_id: str, usage) -> dict:
+    if not usage: return {}
+    
+    prompt_tokens = getattr(usage, "prompt_tokens", 0)
+    completion_tokens = getattr(usage, "completion_tokens", 0)
+    
+    cost_data = {
+        "model": model_id,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_cost_usd": 0.0
+    }
+    
+    for m in cached_models:
+        if m.get("id") == model_id:
+            pricing = m.get("pricing", {})
+            p_cost = float(pricing.get("prompt", 0)) * prompt_tokens
+            c_cost = float(pricing.get("completion", 0)) * completion_tokens
+            cost_data["total_cost_usd"] = round(p_cost + c_cost, 6)
+            break
+            
+    return cost_data
+
 async def safe_send(ws: WebSocket, data: dict):
     if ws not in ws_locks:
         ws_locks[ws] = asyncio.Lock()
@@ -427,6 +450,8 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
         
         # Save Spec artifact
         fs_manager.write_file(f"{artifact_dir}/1_spec.md", spec)
+        cost_payload = calculate_cost_payload(active_model, usage)
+        fs_manager.write_file(f"{artifact_dir}/1_spec_cost.json", json.dumps(cost_payload, indent=2))
         files = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -486,6 +511,8 @@ Every file that needs to be created must appear in this graph. Files with no dep
         
         # Save Planner artifact
         fs_manager.write_file(f"{artifact_dir}/2_plan.md", plan)
+        cost_payload = calculate_cost_payload(active_model, usage)
+        fs_manager.write_file(f"{artifact_dir}/2_plan_cost.json", json.dumps(cost_payload, indent=2))
         files = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -521,6 +548,8 @@ Every file that needs to be created must appear in this graph. Files with no dep
     await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "active"})
     await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander AI analyzing dependency graph and routing files to task forces...", "stage": "commander"})
 
+    commander_model = None
+    commander_usage = None
     routing = {"wizard_clusters": [], "specialist_pairs": [], "swarm_files": []}
 
     if topological_graph:
@@ -606,6 +635,9 @@ Output strictly a valid JSON object matching this schema:
     # Save commander routing artifact
     logging.info("[Station 3.5] Saving commander routing artifact")
     fs_manager.write_file(f"{artifact_dir}/2b_commander_routing.json", json.dumps(routing, indent=2))
+    if commander_model and commander_usage:
+        cost_payload = calculate_cost_payload(commander_model, commander_usage)
+        fs_manager.write_file(f"{artifact_dir}/2b_commander_cost.json", json.dumps(cost_payload, indent=2))
     files_list = fs_manager.list_files()
     await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "complete"})
@@ -643,6 +675,22 @@ SPEC (PRD):
 ARCHITECT PLAN:
 {plan}"""
 
+        executor_cost_data = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_cost_usd": 0.0,
+            "models_used": []
+        }
+
+        def record_executor_cost(model: str, usage):
+            payload = calculate_cost_payload(model, usage)
+            if payload:
+                executor_cost_data["prompt_tokens"] += payload.get("prompt_tokens", 0)
+                executor_cost_data["completion_tokens"] += payload.get("completion_tokens", 0)
+                executor_cost_data["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
+                if model not in executor_cost_data["models_used"]:
+                    executor_cost_data["models_used"].append(model)
+
         # ---- Sub-Routine A: Wizard (tight-coupling, multi-file) ----
         async def execute_wizard(cluster: dict, context: str, model: str) -> list:
             cluster_name = cluster.get("cluster_name", "Unnamed Cluster")
@@ -657,7 +705,8 @@ DO NOT wrap in markdown. DO NOT add any explanations."""
             wizard_user = f"{context}\n\nWRITE THESE FILES AS A CLUSTER (they are tightly coupled):\n{files_list_str}"
 
             try:
-                raw, _ = await llm.generate(wizard_sys, wizard_user, model_name=model)
+                raw, usage = await llm.generate(wizard_sys, wizard_user, model_name=model)
+                record_executor_cost(model, usage)
                 clean = raw.strip()
                 if clean.startswith("```json"): clean = clean[7:]
                 elif clean.startswith("```"): clean = clean[3:]
@@ -686,7 +735,8 @@ DO NOT wrap in markdown."""
             produced_code = ""
             result = []
             try:
-                raw, _ = await llm.generate(producer_sys, producer_user, model_name=model)
+                raw, usage = await llm.generate(producer_sys, producer_user, model_name=model)
+                record_executor_cost(model, usage)
                 clean = raw.strip()
                 if clean.startswith("```json"): clean = clean[7:]
                 elif clean.startswith("```"): clean = clean[3:]
@@ -706,7 +756,8 @@ DO NOT wrap in markdown."""
             consumer_user = f"{context}\n\nThe Backend generated this exact code for `{producer_path}`:\n\n```\n{produced_code}\n```\n\nWRITE THIS CONSUMER FILE to perfectly match it: {consumer_path}"
 
             try:
-                raw, _ = await llm.generate(consumer_sys, consumer_user, model_name=model)
+                raw, usage = await llm.generate(consumer_sys, consumer_user, model_name=model)
+                record_executor_cost(model, usage)
                 clean = raw.strip()
                 if clean.startswith("```json"): clean = clean[7:]
                 elif clean.startswith("```"): clean = clean[3:]
@@ -727,7 +778,8 @@ Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
 DO NOT wrap in markdown. NO explanations."""
             swarm_user = f"{context}\n\nGENERATE ONLY THIS FILE: {filepath}"
             try:
-                raw, _ = await llm.generate(swarm_sys, swarm_user, model_name=model)
+                raw, usage = await llm.generate(swarm_sys, swarm_user, model_name=model)
+                record_executor_cost(model, usage)
                 clean = raw.strip()
                 if clean.startswith("```json"): clean = clean[7:]
                 elif clean.startswith("```"): clean = clean[3:]
@@ -803,6 +855,7 @@ DO NOT wrap in markdown.
 
         # Save executor raw artifact
         fs_manager.write_file(f"{artifact_dir}/3_executor_raw.json", json.dumps(all_generated, indent=2))
+        fs_manager.write_file(f"{artifact_dir}/3_executor_cost.json", json.dumps(executor_cost_data, indent=2))
 
         summary_text = f"✅ **Parallel Execution Complete!**\n\nGenerated {len(saved_files)} file(s) across all task forces:\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
@@ -831,6 +884,8 @@ Write a concise Markdown review document. Point out anything missing or incorrec
         qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
         
         fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
+        cost_payload = calculate_cost_payload(qa_model, qa_usage)
+        fs_manager.write_file(f"{artifact_dir}/4_qa_review_cost.json", json.dumps(cost_payload, indent=2))
         files_list = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         await safe_send(websocket,{
