@@ -105,12 +105,22 @@ async def fetch_openrouter_models():
     global cached_models
     if cached_models:
         return cached_models
+        
+    def load_fallback():
+        try:
+            with open("fallback_models.json", "r") as f:
+                data = json.load(f)
+                return sorted(data, key=lambda x: x.get("name", "").lower())
+        except Exception as fe:
+            print(f"Failed to load fallback models: {fe}")
+            return []
+            
     try:
         api_key = os.getenv('OPENROUTER_API_KEY')
         if not api_key:
             print("WARNING: OPENROUTER_API_KEY is not set!")
             
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 "https://openrouter.ai/api/v1/models",
                 headers={"Authorization": f"Bearer {api_key}"}
@@ -120,13 +130,22 @@ async def fetch_openrouter_models():
                 if "data" in data:
                     sorted_data = sorted(data["data"], key=lambda x: x.get("name", "").lower())
                     cached_models = sorted_data
+                    
+                    # Update fallback file with fresh models
+                    try:
+                        with open("fallback_models.json", "w") as f:
+                            json.dump(data["data"], f)
+                    except: pass
+                    
                     return cached_models
             else:
                 print(f"OpenRouter API returned non-200 status: {resp.status_code} - {resp.text}")
+                cached_models = load_fallback()
+                return cached_models
     except Exception as e:
-        import traceback
-        print(f"Failed to fetch models via backend proxy: {e}")
-        traceback.print_exc()
+        print(f"Failed to fetch models via backend proxy: {e}. Falling back to local cache.")
+        cached_models = load_fallback()
+        return cached_models
     return []
 
 def calculate_cost_payload(model_id: str, usage) -> dict:
