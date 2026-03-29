@@ -1735,14 +1735,14 @@ function NodeModelSelector({
   const filteredOptions = currentCompany ? options.filter(o => o.id.split('/')[0] === currentCompany) : options;
 
   return (
-    <div className="w-full flex justify-center">
+    <div className="flex items-center gap-2">
       {/* Provider Dropdown */}
       <select 
         value={currentCompany} 
         onChange={handleCompanyChange}
-        className="text-[9px] bg-transparent text-[#22d3ee] border-none outline-none cursor-pointer uppercase font-bold"
+        className="bg-[#1a1a24] border border-[#22d3ee]/30 text-[#22d3ee] text-xs font-bold uppercase tracking-wider rounded-md px-2 py-1 outline-none cursor-pointer focus:border-[#22d3ee]/80 transition-colors"
       >
-        <option value="">PROVIDER...</option>
+        <option value="" disabled>PROVIDER</option>
         {companies.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       
@@ -1750,15 +1750,15 @@ function NodeModelSelector({
       <select 
         value={value} 
         onChange={e => onChange(e.target.value)}
-        className="w-[12px] bg-transparent text-transparent border-none outline-none cursor-pointer truncate"
+        className="bg-[#1a1a24] border border-[#a855f7]/30 text-white text-xs rounded-md px-2 py-1 outline-none cursor-pointer focus:border-[#a855f7]/80 transition-colors max-w-[200px] truncate"
         disabled={!currentCompany}
       >
-        <option value="">MODEL...</option>
+        <option value="" disabled>Select Model...</option>
         {filteredOptions.map(o => {
-           let display = o.name;
-           if (display.toLowerCase().startsWith(currentCompany.toLowerCase() + ":")) {
+           let display = o.name || o.id.split("/").pop();
+           if (display && currentCompany && display.toLowerCase().startsWith(currentCompany.toLowerCase() + ":")) {
              display = display.substring(currentCompany.length + 1).trim();
-           } else if (display.toLowerCase().startsWith(currentCompany.toLowerCase() + " ")) {
+           } else if (display && currentCompany && display.toLowerCase().startsWith(currentCompany.toLowerCase() + " ")) {
              display = display.substring(currentCompany.length + 1).trim();
            }
            return <option key={o.id} value={o.id}>{display}</option>;
