@@ -1453,6 +1453,9 @@ CRITICAL: Return ONLY a valid JSON object with this schema:
         update_run_costs("qa_reviewer", qa_model, qa_usage)
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"**QA Review:**\n{qa_res}", "stage": "qaReviewer"})
         fs_manager.write_file(f"{artifact_dir}/2_qa.md", qa_res)
+        # Broadcast file list after QA writes its file
+        files = fs_manager.list_files()
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
     except Exception as e:
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ QA Error: {e}", "stage": "qaReviewer"})
         
@@ -1460,6 +1463,9 @@ CRITICAL: Return ONLY a valid JSON object with this schema:
     
     run_costs["total_cost_usd"] = round(run_costs["total_cost_usd"], 5)
     await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"📊 **Workflow Complete.**\nTarget Eliminated.\nCost: ${run_costs['total_cost_usd']}", "stage": "origin"})
+    # Final authoritative file list broadcast before completing
+    files = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
     await safe_send(websocket,{"event": "workflow_complete"})
 
 
@@ -1555,6 +1561,9 @@ Write a highly detailed outline and creative brief for the writer. DO NOT WRITE 
         update_run_costs("copy_editor", qa_model, usage)
         fs_manager.write_file(f"{artifact_dir}/3_copy_edits.md", qa_res)
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"**Review Notes:**\n{qa_res}", "stage": "qaReviewer"})
+        # Broadcast file list after copy editor writes its file
+        files = fs_manager.list_files()
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
     except Exception as e:
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Copy Editor Error: {e}", "stage": "qaReviewer"})
 
@@ -1562,6 +1571,9 @@ Write a highly detailed outline and creative brief for the writer. DO NOT WRITE 
 
     run_costs["total_cost_usd"] = round(run_costs["total_cost_usd"], 5)
     await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"📰 **Publishing Complete.**\nCost: ${run_costs['total_cost_usd']}", "stage": "origin"})
+    # Final authoritative file list broadcast before completing
+    files = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
     await safe_send(websocket,{"event": "workflow_complete"})
 
 
