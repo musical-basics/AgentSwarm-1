@@ -23,14 +23,14 @@
       "**/pnpm-lock.yaml",
       "repomix.xml",
       "repomix-instruction.md",
-      "frontend/**",
-      "_v0_frontend/components/ui/**",
+      "_v0_frontend/**",
       "**/.next/**",
       "**/out/**",
       "workspace_sandbox/**",
       "**/swarm.log",
       "**/.ide_state.json",
       "**/.env.local",
+      "**/fallback_models.json",
       "agent-swarm-repomix.xml"
     ]
   }
