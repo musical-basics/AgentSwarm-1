@@ -206,3 +206,4 @@ RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/N
 2026-03-28 22:26:12,795 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
 2026-03-28 22:26:14,227 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
 2026-03-28 22:26:15,661 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:48:58,439 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"

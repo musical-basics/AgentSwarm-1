@@ -1853,7 +1853,12 @@ function WorkflowNode({
         scale: status === "active" ? 1.1 : 1,
       }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      onContextMenu={onContextMenu}
+      onContextMenu={(e) => {
+        if (onContextMenu) {
+          e.stopPropagation();
+          onContextMenu(e);
+        }
+      }}
     >
       {/* Pulsing glow overlay when active */}
       <AnimatePresence>
