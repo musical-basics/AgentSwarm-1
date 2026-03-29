@@ -1320,9 +1320,64 @@ export function FlowmindIDE() {
               {swarmTab === "config" && (
                 <div className="w-full h-full relative overflow-y-auto pt-32 pb-20 px-8">
                   <div className="max-w-xl mx-auto space-y-4">
-                    <div className="flex items-center gap-2 mb-6">
-                      <Settings2 className="w-5 h-5 text-[#a855f7]" />
-                      <h2 className="text-lg font-bold text-white tracking-wider uppercase">Node Configuration <span className="text-[9px] text-gray-500 lowercase ml-2">({modelOptions.length} models loaded)</span></h2>
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-2">
+                        <Settings2 className="w-5 h-5 text-[#a855f7]" />
+                        <h2 className="text-lg font-bold text-white tracking-wider uppercase">Node Configuration <span className="text-[9px] text-gray-500 lowercase ml-2">({modelOptions.length} models loaded)</span></h2>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="cursor-pointer px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md text-xs font-bold uppercase tracking-wider text-gray-300 transition-colors">
+                          <input 
+                            type="file" 
+                            accept=".json" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                try {
+                                  const content = event.target?.result as string;
+                                  const data = JSON.parse(content);
+                                  setNodeModels(prev => {
+                                    const next = { ...prev };
+                                    for (const [key, value] of Object.entries(data)) {
+                                      if (typeof value === "string") {
+                                        next[key as keyof typeof next] = { easy: value as any, medium: value as any, hard: value as any };
+                                      } else if (typeof value === "object" && value !== null) {
+                                        next[key as keyof typeof next] = { ...((prev as any)[key] || {}), ...(value as any) };
+                                      }
+                                    }
+                                    return next;
+                                  });
+                                } catch (err) {
+                                  console.error("Failed to parse config JSON", err);
+                                  alert("Failed to parse the preset JSON. Ensure it is valid.");
+                                }
+                                e.target.value = '';
+                              };
+                              reader.readAsText(file);
+                            }}
+                          />
+                          Load Preset
+                        </label>
+                        <button
+                          onClick={() => {
+                            const blob = new Blob([JSON.stringify(nodeModels, null, 2)], { type: "application/json" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = "swarm_model_preset.json";
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-3 py-1.5 bg-[#a855f7]/10 hover:bg-[#a855f7]/20 border border-[#a855f7]/30 rounded-md text-xs font-bold uppercase tracking-wider text-[#a855f7] transition-colors"
+                        >
+                          Save Preset
+                        </button>
+                      </div>
                     </div>
 
                     {[
