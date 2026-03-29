@@ -175,3 +175,12 @@ RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/N
 2026-03-28 22:11:07,857 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
 2026-03-28 22:11:13,892 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
 2026-03-28 22:13:19,126 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:23:26,474 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 22:23:39,103 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:23:40,575 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:23:40,582 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:23:50,464 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:23:51,584 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:23:51,585 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:23:51,585 - INFO - [Dispatcher] Profile=sniper, Complexity=2, MaxTokens=3072
+2026-03-28 22:23:52,088 - ERROR - CRITICAL SWARM ERROR: 'FileSystemManager' object has no attribute 'format_all_files'

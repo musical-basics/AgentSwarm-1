@@ -262,6 +262,32 @@ class FileSystemManager:
         with open(safe_path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    def format_all_files(self) -> str:
+        """Returns a single string containing the paths and contents of all files in the workspace.
+        This is used to inject existing context into LLM prompts without needing complex tool usage.
+        Avoids reading large binaries or non-text files."""
+        out = []
+        for root, dirs, files in os.walk(self.workspace_path):
+            # Exclude hidden directories like .git
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            if '_swarm_artifacts' in dirs:
+                dirs.remove('_swarm_artifacts') # dont feed artifacts back in if not needed
+                
+            for file in files:
+                if file.startswith('.') or file.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.zip', '.tar', '.gz')):
+                    continue
+                path = os.path.join(root, file)
+                rel_path = os.path.relpath(path, self.workspace_path)
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    out.append(f"--- FILE: {rel_path} ---\n{content}\n")
+                except UnicodeDecodeError:
+                    pass # ignore binary files
+        if not out:
+            return "No files in the workspace yet."
+        return "\n".join(out)
+
 WORKSPACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../workspace_sandbox"))
 _initial_state = load_ide_state()
 _saved_workspace = _initial_state.get("last_workspace")
