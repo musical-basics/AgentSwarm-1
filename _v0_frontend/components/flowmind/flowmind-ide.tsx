@@ -20,6 +20,7 @@ import {
   Play,
   Terminal,
   Settings,
+  Settings2,
   Search,
   GitBranch,
   GripVertical,
@@ -895,81 +896,83 @@ export function FlowmindIDE() {
             {/* Workflow Graph */}
             <div className="relative z-10 flex flex-col items-center justify-center h-full p-6 w-full">
               {/* Top Action Buttons */}
-              <div className="absolute top-4 right-4 left-4 flex items-center justify-end flex-wrap gap-2 z-30">
-                <motion.button
-                  onClick={handleExportModels}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
-                  style={{
-                    background: "rgba(168,85,247,0.1)",
-                    border: "1px solid rgba(168,85,247,0.3)",
-                    color: "#a855f7",
-                  }}
-                  whileHover={{ 
-                    scale: 1.05,
-                    backgroundColor: "rgba(168,85,247,0.2)",
-                    boxShadow: "0 0 15px rgba(168,85,247,0.3)",
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Export Models
-                </motion.button>
+              <div className="absolute top-4 right-4 left-4 flex flex-col gap-3 z-30">
+                <div className="flex items-center justify-between w-full">
+                  {/* Tab Selector */}
+                  <div className="flex items-center gap-1 bg-[#12121a] p-1 rounded-lg border border-[#22d3ee]/20">
+                    <button
+                      onClick={() => setSwarmTab("topology")}
+                      className={`px-3 py-1.5 rounded-md text-[10px] font-bold tracking-wider uppercase transition-colors ${
+                        swarmTab === "topology" 
+                          ? "bg-[#22d3ee]/20 text-[#22d3ee] shadow-[0_0_10px_rgba(34,211,238,0.2)]" 
+                          : "text-gray-500 hover:text-gray-300"
+                      }`}
+                    >
+                      ⚡️ Topology
+                    </button>
+                    <button
+                      onClick={() => setSwarmTab("config")}
+                      className={`px-3 py-1.5 rounded-md text-[10px] font-bold tracking-wider uppercase transition-colors ${
+                        swarmTab === "config" 
+                          ? "bg-[#a855f7]/20 text-[#a855f7] shadow-[0_0_10px_rgba(168,85,247,0.2)]" 
+                          : "text-gray-500 hover:text-gray-300"
+                      }`}
+                    >
+                      ⚙️ Node Config
+                    </button>
+                  </div>
 
-                <motion.button
-                  onClick={() => {
-                    if (socket) {
-                      socket.send(JSON.stringify({ command: "load_config" }));
-                    } else {
-                      alert("Not connected to backend");
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
-                  style={{
-                    background: "rgba(34,211,238,0.1)",
-                    border: "1px solid rgba(34,211,238,0.3)",
-                    color: "#22d3ee",
-                  }}
-                  whileHover={{ 
-                    scale: 1.05,
-                    backgroundColor: "rgba(34,211,238,0.2)",
-                    boxShadow: "0 0 15px rgba(34,211,238,0.3)",
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  Open Config
-                </motion.button>
-
-                <motion.button
-                  onClick={() => {
-                    if (socket) {
-                      socket.send(JSON.stringify({ 
-                        command: "save_config", 
-                        config: nodeModels,
-                        chatAgentCompany,
-                        chatAgentModel
-                      }));
-                      setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration and chat defaults." }]);
-                    } else {
-                      alert("Not connected to backend");
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
-                  style={{
-                    background: "rgba(34,211,238,0.1)",
-                    border: "1px solid rgba(34,211,238,0.3)",
-                    color: "#22d3ee",
-                  }}
-                  whileHover={{ 
-                    scale: 1.05,
-                    backgroundColor: "rgba(34,211,238,0.2)",
-                    boxShadow: "0 0 15px rgba(34,211,238,0.3)",
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  Save Config
-                </motion.button>
+                  {/* Config Action Buttons */}
+                  <div className="flex items-center gap-2">
+                    <motion.button
+                      onClick={handleExportModels}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                      style={{
+                        background: "rgba(168,85,247,0.1)",
+                        border: "1px solid rgba(168,85,247,0.3)",
+                        color: "#a855f7",
+                      }}
+                      whileHover={{ scale: 1.05, backgroundColor: "rgba(168,85,247,0.2)", boxShadow: "0 0 15px rgba(168,85,247,0.3)" }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export Models
+                    </motion.button>
+                    <motion.button
+                      onClick={() => socket ? socket.send(JSON.stringify({ command: "load_config" })) : alert("Not connected")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                      style={{
+                        background: "rgba(34,211,238,0.1)",
+                        border: "1px solid rgba(34,211,238,0.3)",
+                        color: "#22d3ee",
+                      }}
+                      whileHover={{ scale: 1.05, backgroundColor: "rgba(34,211,238,0.2)", boxShadow: "0 0 15px rgba(34,211,238,0.3)" }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Open Config
+                    </motion.button>
+                    <motion.button
+                      onClick={() => {
+                        if (socket) {
+                          socket.send(JSON.stringify({ command: "save_config", config: nodeModels, chatAgentCompany, chatAgentModel }));
+                          setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration and chat defaults." }]);
+                        } else alert("Not connected");
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                      style={{
+                        background: "rgba(34,211,238,0.1)",
+                        border: "1px solid rgba(34,211,238,0.3)",
+                        color: "#22d3ee",
+                      }}
+                      whileHover={{ scale: 1.05, backgroundColor: "rgba(34,211,238,0.2)", boxShadow: "0 0 15px rgba(34,211,238,0.3)" }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      Save Config
+                    </motion.button>
+                  </div>
+                </div>
 
                 {/* Swarm prompt input + action button */}
                 <div className="flex flex-col gap-2 w-full">
@@ -1071,6 +1074,9 @@ export function FlowmindIDE() {
                 </div>
               </div>
 
+              {/* === TAB CONTENT: TOPOLOGY === */}
+              {swarmTab === "topology" && (
+                <div className="w-full h-full relative overflow-y-auto">
               {/* === ENTERPRISE PROFILE === */}
               {activeProfile === "enterprise" && (
                 <div className="flex flex-col items-center w-full">
@@ -1290,6 +1296,50 @@ export function FlowmindIDE() {
                         activeModelId={nodeModels.qaReviewer}
                       />
                     </div>
+                  </div>
+                </div>
+              )}
+                </div>
+              )}
+              {/* === TAB CONTENT: NODE CONFIG === */}
+              {swarmTab === "config" && (
+                <div className="w-full h-full relative overflow-y-auto pt-32 pb-20 px-8">
+                  <div className="max-w-xl mx-auto space-y-4">
+                    <div className="flex items-center gap-2 mb-6">
+                      <Settings2 className="w-5 h-5 text-[#a855f7]" />
+                      <h2 className="text-lg font-bold text-white tracking-wider uppercase">Node Configuration</h2>
+                    </div>
+
+                    {[
+                      { key: "origin", label: "The Origin", desc: "Intent classifier and token manager", color: "cyan" as const },
+                      { key: "specFactory", label: "Spec Factory", desc: "Generates step-by-step PRDs", color: "purple" as const },
+                      { key: "overseer", label: "Overseer", desc: "System architect and task manager", color: "indigo" as const },
+                      { key: "planner", label: "Planner", desc: "Coordinates complex task trees", color: "emerald" as const },
+                      { key: "commander", label: "Commander", desc: "Delegates to specialized executors", color: "indigo" as const },
+                      { key: "executorWizard", label: "Wizard", desc: "Writes new code or complex logic", color: "amber" as const },
+                      { key: "executorSpecialist", label: "Specialist", desc: "Handles repetitive or data tasks", color: "cyan" as const },
+                      { key: "executorSwarm", label: "Swarm", desc: "Parallel sub-task worker", color: "emerald" as const },
+                      { key: "qaReviewer", label: "QA Reviewer", desc: "Validates code before writing", color: "rose" as const },
+                    ].map(({ key, label, desc, color }) => (
+                      <div key={key} className="flex flex-col gap-2 p-3 bg-[#12121a]/80 border border-[#22d3ee]/20 rounded-xl hover:border-[#22d3ee]/50 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-2 h-2 rounded-full`} style={{ backgroundColor: color === "cyan" ? "#22d3ee" : color === "purple" ? "#a855f7" : color === "indigo" ? "#6366f1" : color === "emerald" ? "#34d399" : color === "amber" ? "#fbbf24" : "#f43f5e" }} />
+                            <div>
+                              <span className="text-sm font-bold text-white uppercase tracking-wider">{label}</span>
+                              <span className="text-[10px] text-gray-500 ml-2">{desc}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="pl-5">
+                          <NodeModelSelector 
+                            value={nodeModels[key as keyof typeof nodeModels]} 
+                            onChange={(v) => setNodeModels(p => ({...p, [key]: v}))}
+                            options={modelOptions} 
+                          />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
