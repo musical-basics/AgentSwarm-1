@@ -1,12 +1,22 @@
 import asyncio
 import os
 import uvicorn
+import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 load_dotenv(".env.local")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("swarm.log"),
+        logging.StreamHandler()
+    ]
+)
 
 app = FastAPI()
 
@@ -43,8 +53,14 @@ class LLMEngine:
         if is_json:
             kwargs["response_format"] = {"type": "json_object"}
             
-        response = await self.client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content, response.usage
+        logging.info(f"[LLM Generate] Starting request to model: {model_name}, is_json: {is_json}")
+        try:
+            response = await self.client.chat.completions.create(**kwargs)
+            logging.info(f"[LLM Generate] Success for model: {model_name}")
+            return response.choices[0].message.content, response.usage
+        except Exception as e:
+            logging.error(f"[LLM Generate] Failed for model {model_name}: {e}")
+            raise
 
     async def generate_stream(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash", is_json: bool = False):
         kwargs = {
@@ -78,6 +94,16 @@ def save_ide_state(state: dict):
 
 active_ws_connections = set()
 active_pty_fds = set()
+ws_locks = {}
+
+async def safe_send(ws: WebSocket, data: dict):
+    if ws not in ws_locks:
+        ws_locks[ws] = asyncio.Lock()
+    async with ws_locks[ws]:
+        try:
+            await ws.send_json(data)
+        except Exception:
+            pass
 
 import time
 from watchdog.observers import Observer
@@ -110,7 +136,7 @@ class WorkspaceWatcher(FileSystemEventHandler):
             dead_ws = set()
             for ws in active_ws_connections:
                 try:
-                    await ws.send_json({"event": "file_list", "files": files, "workspace_name": workspace_name})
+                    await safe_send(ws, {"event": "file_list", "files": files, "workspace_name": workspace_name})
                 except Exception:
                     dead_ws.add(ws)
             for ws in dead_ws:
@@ -226,7 +252,7 @@ Rules:
     messages.append({"role": "user", "content": message})
 
     # Stream typing indicator
-    await websocket.send_json({"event": "agent_chat_typing", "model": model})
+    await safe_send(websocket,{"event": "agent_chat_typing", "model": model})
 
     try:
         response = await llm.client.chat.completions.create(
@@ -238,7 +264,7 @@ Rules:
         text = response.choices[0].message.content or ""
         usage = response.usage
     except Exception as e:
-        await websocket.send_json({
+        await safe_send(websocket,{
             "event": "agent_chat_response",
             "text": f"⚠️ API Error: {str(e)}",
             "commands": [],
@@ -290,9 +316,9 @@ Rules:
     # Refresh file tree if any commands ran (they might have created files)
     if command_results:
         files = fs_mgr.list_files()
-        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(workspace)})
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(workspace)})
 
-    await websocket.send_json({
+    await safe_send(websocket,{
         "event": "agent_chat_response",
         "text": text,
         "commands": command_results,
@@ -300,10 +326,18 @@ Rules:
         "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else {},
     })
 
-async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
+async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: dict = None):
+    try:
+        await _execute_live_swarm_logic(websocket, message, models_dict)
+    except Exception as e:
+        logging.error(f"CRITICAL SWARM ERROR: {e}")
+        await safe_send(websocket, {"event": "chat", "sender": "swarm", "text": f"CRITICAL CRASH: {str(e)}", "stage": "executor"})
+        await safe_send(websocket, {"event": "workflow_complete"})
+
+async def _execute_live_swarm_logic(websocket: WebSocket, prompt: str, models: dict):
 
     # Let the UI reset state
-    await websocket.send_json({"event": "workflow_start", "message": prompt})
+    await safe_send(websocket,{"event": "workflow_start", "message": prompt})
     
     # Create artifacts directory
     import datetime
@@ -313,14 +347,14 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     
     # === Station 1: The Origin ===
     print("Starting station: origin")
-    await websocket.send_json({
+    await safe_send(websocket,{
         "event": "station_update", 
         "station": "origin", 
         "status": "active"
     })
     
     # Broadcast the raw idea to chat
-    await websocket.send_json({
+    await safe_send(websocket,{
         "event": "chat",
         "sender": "swarm",
         "text": f"Raw Idea Captured: {prompt}",
@@ -330,22 +364,22 @@ async def execute_live_swarm(websocket: WebSocket, prompt: str, models: dict):
     # Save Origin artifact
     fs_manager.write_file(f"{artifact_dir}/0_origin.md", prompt)
     files = fs_manager.list_files()
-    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     
     # Complete origin
     await asyncio.sleep(0.5)
-    await websocket.send_json({"event": "station_update", "station": "origin", "status": "complete"})
+    await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "complete"})
     
     # === Station 2: Spec Factory ===
     print("Starting station: specFactory")
-    await websocket.send_json({
+    await safe_send(websocket,{
         "event": "station_update", 
         "station": "specFactory", 
         "status": "active"
     })
     
     # Send intermediate chat
-    await websocket.send_json({
+    await safe_send(websocket,{
         "event": "chat",
         "sender": "swarm",
         "text": "Generating specifications via OpenRouter...",
@@ -371,10 +405,10 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
         # Save Spec artifact
         fs_manager.write_file(f"{artifact_dir}/1_spec.md", spec)
         files = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
         # Broadcast the generated spec
-        await websocket.send_json({
+        await safe_send(websocket,{
             "event": "chat",
             "sender": "swarm",
             "text": spec,
@@ -386,7 +420,7 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
             }
         })
     except Exception as e:
-        await websocket.send_json({
+        await safe_send(websocket,{
             "event": "chat",
             "sender": "swarm",
             "text": f"LLM Error: {str(e)}",
@@ -395,14 +429,16 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
         spec = f"Fallback Spec for: {prompt}"
     
     # Complete specFactory
-    await websocket.send_json({"event": "station_update", "station": "specFactory", "status": "complete"})
+    await safe_send(websocket,{"event": "station_update", "station": "specFactory", "status": "complete"})
     
     # === Station 3: PLANNER ===
+    logging.info("[Station 3] Starting station: planner")
     print("Starting station: planner")
-    await websocket.send_json({"event": "station_update", "station": "planner", "status": "active"})
-    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Planning architecture and layout...", "stage": "planner"})
+    await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Planning architecture and layout...", "stage": "planner"})
     try:
         active_model = models.get("planner", "google/gemini-2.5-flash")
+        logging.info(f"[Station 3] Using planner model: {active_model}")
         sys_prompt = """You are the Senior Systems Architect (Planner). 
 Take the PRD and write an exhaustive, function-by-function architectural plan in Markdown.
 CRITICAL MANDATE: DO NOT WRITE EXECUTABLE CODE. You must use pseudo-code and architectural diagrams.
@@ -428,38 +464,44 @@ Every file that needs to be created must appear in this graph. Files with no dep
         # Save Planner artifact
         fs_manager.write_file(f"{artifact_dir}/2_plan.md", plan)
         files = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
-        await websocket.send_json({
+        await safe_send(websocket,{
             "event": "chat", "sender": "swarm", "text": plan, "stage": "planner", 
             "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
         })
     except Exception as e:
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Planner Error: {str(e)}", "stage": "planner"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Planner Error: {str(e)}", "stage": "planner"})
         plan = "Fallback Plan: Proceed to execution."
-    await websocket.send_json({"event": "station_update", "station": "planner", "status": "complete"})
+    await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "complete"})
 
     # === Extract Topological Graph from Planner output ===
+    logging.info("[Station 3] Extracting Topological Graph")
     topological_graph = []
     topo_match = re.search(r'```json\s*(\{.*?\})\s*```', plan, re.DOTALL)
     if topo_match:
         try:
             topo_data = json.loads(topo_match.group(1))
             topological_graph = topo_data.get("topological_graph", [])
+            logging.info(f"[Commander] Extracted topological graph with {len(topological_graph)} files.")
             print(f"[Commander] Extracted topological graph with {len(topological_graph)} files.")
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logging.error(f"[Commander] Failed to parse topological graph JSON: {e}")
             print("[Commander] Failed to parse topological graph JSON.")
     else:
+        logging.warning("[Commander] No topological graph found in planner output — will use fallback.")
         print("[Commander] No topological graph found in planner output — will use fallback.")
 
     # === Station 3.5: COMMANDER AI ===
+    logging.info("[Station 3.5] Starting station: commander")
     print("Starting station: commander")
-    await websocket.send_json({"event": "station_update", "station": "commander", "status": "active"})
-    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Commander AI analyzing dependency graph and routing files to task forces...", "stage": "commander"})
+    await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander AI analyzing dependency graph and routing files to task forces...", "stage": "commander"})
 
     routing = {"wizard_clusters": [], "specialist_pairs": [], "swarm_files": []}
 
     if topological_graph:
+        logging.info("[Station 3.5] Topological graph found, generating routing")
         try:
             commander_model = models.get("commander", "google/gemini-2.5-flash")
             commander_sys = """You are the Commander AI (Dynamic Execution Router).
@@ -499,9 +541,11 @@ Output strictly a valid JSON object matching this schema:
 }"""
             commander_user = f"TOPOLOGICAL DEPENDENCY GRAPH:\n{json.dumps(topological_graph, indent=2)}"
             
+            logging.info(f"[Station 3.5] Calling LLM with model {commander_model}")
             commander_raw, commander_usage = await llm.generate(
                 commander_sys, commander_user, model_name=commander_model, is_json=True
             )
+            logging.info(f"[Station 3.5] LLM generation success. Raw response length: {len(commander_raw)}")
 
             # Strip any markdown wrappers
             clean_commander = commander_raw.strip()
@@ -518,32 +562,36 @@ Output strictly a valid JSON object matching this schema:
             swarm_count = len(routing.get("swarm_files", []))
 
             summary = f"**Commander Routing Plan:**\n- 🧙 {wizard_count} Wizard Cluster(s)\n- 🤝 {specialist_count} Specialist Pair(s)\n- ⚡ {swarm_count} Swarm File(s)"
-            await websocket.send_json({
+            await safe_send(websocket,{
                 "event": "chat", "sender": "swarm", "text": summary, "stage": "commander",
                 "usage": {"prompt_tokens": commander_usage.prompt_tokens, "completion_tokens": commander_usage.completion_tokens, "model": commander_model}
             })
 
         except Exception as e:
+            logging.error(f"[Commander] Error: {e}. Using fallback routing.")
             print(f"[Commander] Error: {e}. Using fallback routing.")
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Commander routing failed ({str(e)}). Using fallback: single wizard cluster.", "stage": "commander"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Commander routing failed ({str(e)}). Using fallback: single wizard cluster.", "stage": "commander"})
             # Fallback: dump everything into one wizard cluster
             all_files = [item["file_path"] for item in topological_graph if "file_path" in item]
             if all_files:
                 routing = {"wizard_clusters": [{"cluster_name": "Fallback Cluster", "files": all_files}], "specialist_pairs": [], "swarm_files": []}
     else:
         # No graph at all — Commander will pass through; Executor will be full-context
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "No dependency graph available. Commander delegating full-context generation to Wizard.", "stage": "commander"})
+        logging.info("[Station 3.5] No dependency graph available handling pass-through")
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "No dependency graph available. Commander delegating full-context generation to Wizard.", "stage": "commander"})
 
     # Save commander routing artifact
+    logging.info("[Station 3.5] Saving commander routing artifact")
     fs_manager.write_file(f"{artifact_dir}/2b_commander_routing.json", json.dumps(routing, indent=2))
     files_list = fs_manager.list_files()
-    await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-    await websocket.send_json({"event": "station_update", "station": "commander", "status": "complete"})
+    await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "complete"})
 
     # === Station 4: TRI-TIER EXECUTOR ===
+    logging.info("[Station 4] Starting station: executor")
     print("Starting station: executor")
-    await websocket.send_json({"event": "station_update", "station": "executor", "status": "active"})
-    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Commander deployed. Executing parallel task forces...", "stage": "executor"})
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "active"})
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander deployed. Executing parallel task forces...", "stage": "executor"})
 
     try:
         # Build shared context
@@ -576,7 +624,7 @@ ARCHITECT PLAN:
         async def execute_wizard(cluster: dict, context: str, model: str) -> list:
             cluster_name = cluster.get("cluster_name", "Unnamed Cluster")
             files_list_str = "\n".join(f"- {f}" for f in cluster.get("files", []))
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"🧙 [Wizard] Generating cluster: **{cluster_name}** ({len(cluster.get('files', []))} files)...", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🧙 [Wizard] Generating cluster: **{cluster_name}** ({len(cluster.get('files', []))} files)...", "stage": "executor"})
 
             wizard_sys = """You are the One-Shot Wizard (High-Context Code Generator).
 You will write ALL files in this cluster simultaneously with full shared context.
@@ -593,10 +641,10 @@ DO NOT wrap in markdown. DO NOT add any explanations."""
                 if clean.endswith("```"): clean = clean[:-3]
                 data = json.loads(clean.strip())
                 result = data.get("files", [])
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"✅ [Wizard] Cluster **{cluster_name}** complete: {len(result)} file(s) generated.", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"✅ [Wizard] Cluster **{cluster_name}** complete: {len(result)} file(s) generated.", "stage": "executor"})
                 return result
             except Exception as e:
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Wizard] Cluster **{cluster_name}** failed: {str(e)}", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Wizard] Cluster **{cluster_name}** failed: {str(e)}", "stage": "executor"})
                 return []
 
         # ---- Sub-Routine B: Specialist (producer → consumer ping-pong) ----
@@ -604,7 +652,7 @@ DO NOT wrap in markdown. DO NOT add any explanations."""
             bridge_name = pair.get("bridge_name", "Unnamed Bridge")
             producer_path = pair.get("producer", "")
             consumer_path = pair.get("consumer", "")
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"🤝 [Specialist] Generating bridge: **{bridge_name}** ({producer_path} → {consumer_path})...", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🤝 [Specialist] Generating bridge: **{bridge_name}** ({producer_path} → {consumer_path})...", "stage": "executor"})
 
             # Step 1: Generate producer
             producer_sys = """You are a Backend Specialist. Write ONLY this single file.
@@ -623,9 +671,9 @@ DO NOT wrap in markdown."""
                 producer_data = json.loads(clean.strip())
                 produced_code = producer_data.get("content", "")
                 result.append({"path": producer_path, "content": produced_code})
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"  → Producer `{producer_path}` done.", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"  → Producer `{producer_path}` done.", "stage": "executor"})
             except Exception as e:
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Producer `{producer_path}` failed: {str(e)}", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Producer `{producer_path}` failed: {str(e)}", "stage": "executor"})
 
             # Step 2: Generate consumer using producer code as context
             consumer_sys = """You are a Frontend Specialist. Write ONLY this single consumer file.
@@ -642,15 +690,15 @@ DO NOT wrap in markdown."""
                 if clean.endswith("```"): clean = clean[:-3]
                 consumer_data = json.loads(clean.strip())
                 result.append({"path": consumer_path, "content": consumer_data.get("content", "")})
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"  → Consumer `{consumer_path}` done. Bridge **{bridge_name}** complete.", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"  → Consumer `{consumer_path}` done. Bridge **{bridge_name}** complete.", "stage": "executor"})
             except Exception as e:
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Consumer `{consumer_path}` failed: {str(e)}", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Consumer `{consumer_path}` failed: {str(e)}", "stage": "executor"})
 
             return result
 
         # ---- Sub-Routine C: Swarm Worker (single isolated file) ----
         async def execute_swarm_worker(filepath: str, context: str, model: str) -> list:
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚡ [Swarm] Generating `{filepath}`...", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚡ [Swarm] Generating `{filepath}`...", "stage": "executor"})
             swarm_sys = """You are a Swarm Worker. Generate ONLY this single isolated file.
 Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
 DO NOT wrap in markdown. NO explanations."""
@@ -664,7 +712,7 @@ DO NOT wrap in markdown. NO explanations."""
                 data = json.loads(clean.strip())
                 return [{"path": data.get("path", filepath), "content": data.get("content", "")}]
             except Exception as e:
-                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Swarm] `{filepath}` failed: {str(e)}", "stage": "executor"})
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Swarm] `{filepath}` failed: {str(e)}", "stage": "executor"})
                 return []
 
         # ---- Orchestrate with asyncio.gather ----
@@ -679,7 +727,7 @@ DO NOT wrap in markdown. NO explanations."""
 
         if not wizard_clusters and not specialist_pairs and not swarm_files:
             # Full fallback: use legacy single-model executor
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": "No routing data. Falling back to full-context single-model generation...", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "No routing data. Falling back to full-context single-model generation...", "stage": "executor"})
             legacy_model = models.get("executor", "anthropic/claude-3-haiku")
             legacy_sys = """You are the Senior Execution Drone.
 Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
@@ -734,13 +782,13 @@ DO NOT wrap in markdown.
         fs_manager.write_file(f"{artifact_dir}/3_executor_raw.json", json.dumps(all_generated, indent=2))
 
         summary_text = f"✅ **Parallel Execution Complete!**\n\nGenerated {len(saved_files)} file(s) across all task forces:\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
         files_list = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
 
         # === Station 4.5: QA REVIEWER ===
-        await websocket.send_json({"event": "station_update", "station": "qaReviewer", "status": "active"})
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Reviewing codebase for architectural alignment...", "stage": "qaReviewer"})
+        await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "active"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Reviewing codebase for architectural alignment...", "stage": "qaReviewer"})
         
         qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
         qa_sys_prompt = """You are the Lead QA Engineer. 
@@ -761,14 +809,14 @@ Write a concise Markdown review document. Point out anything missing or incorrec
         
         fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
         files_list = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-        await websocket.send_json({
+        await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        await safe_send(websocket,{
             "event": "chat", "sender": "swarm", "text": qa_output, "stage": "qaReviewer",
             "usage": {"prompt_tokens": qa_usage.prompt_tokens, "completion_tokens": qa_usage.completion_tokens, "model": qa_model}
         })
-        await websocket.send_json({"event": "station_update", "station": "qaReviewer", "status": "complete"})
+        await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "complete"})
         
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Determining execution commands...", "stage": "executor"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Determining execution commands...", "stage": "executor"})
         runner_sys_prompt = """You are the DevOps Runner.
 Read the architectural plan and generated files. Output the exact bash commands to install dependencies (e.g. pip3 install) and run the main application.
 Output EXACTLY a valid JSON object. DO NOT wrap the JSON in markdown code blocks.
@@ -802,15 +850,15 @@ Schema:
                     os.write(pty_fd, cmd_str.encode('utf-8'))
                 except Exception:
                     pass
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Running in Local Terminal:\n\n`{cmd_str.strip()}`", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Running in Local Terminal:\n\n`{cmd_str.strip()}`", "stage": "executor"})
         elif commands:
-            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"No active Local Terminal. Please run:\n\n`{' && '.join(commands)}`", "stage": "executor"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"No active Local Terminal. Please run:\n\n`{' && '.join(commands)}`", "stage": "executor"})
             
     except Exception as e:
-        await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Executor Error: {str(e)}", "stage": "executor"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Executor Error: {str(e)}", "stage": "executor"})
 
-    await websocket.send_json({"event": "station_update", "station": "executor", "status": "complete"})
-    await websocket.send_json({"event": "workflow_complete"})
+    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "complete"})
+    await safe_send(websocket,{"event": "workflow_complete"})
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -824,16 +872,16 @@ async def websocket_endpoint(websocket: WebSocket):
         fs_manager.workspace_path = saved_workspace
 
     if "layout" in state:
-        await websocket.send_json({"event": "layout_loaded", "layout": state["layout"], "chatAgentCompany": state.get("chatAgentCompany"), "chatAgentModel": state.get("chatAgentModel")})
+        await safe_send(websocket,{"event": "layout_loaded", "layout": state["layout"], "chatAgentCompany": state.get("chatAgentCompany"), "chatAgentModel": state.get("chatAgentModel")})
 
     # Send initial file list
     files = fs_manager.list_files()
-    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     
     # Try to load workspace-specific config automatically (DB or fallback file)
     config_data = get_workspace_config(fs_manager.workspace_path)
     if config_data:
-        await websocket.send_json({"event": "config_loaded", "config": config_data})
+        await safe_send(websocket,{"event": "config_loaded", "config": config_data})
     try:
         while True:
             data = await websocket.receive_json()
@@ -841,23 +889,23 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if command == "list_files":
                 files = fs_manager.list_files(data.get("path", ""))
-                await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+                await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 
             elif command == "read_file":
                 try:
                     content = fs_manager.read_file(data.get("path"))
-                    await websocket.send_json({"event": "file_content", "path": data.get("path"), "content": content})
+                    await safe_send(websocket,{"event": "file_content", "path": data.get("path"), "content": content})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": str(e)})
+                    await safe_send(websocket,{"event": "error", "message": str(e)})
                     
             elif command == "write_file":
                 try:
                     fs_manager.write_file(data.get("path"), data.get("content"))
-                    await websocket.send_json({"event": "file_written", "path": data.get("path")})
+                    await safe_send(websocket,{"event": "file_written", "path": data.get("path")})
                     files = fs_manager.list_files()
-                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+                    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": str(e)})
+                    await safe_send(websocket,{"event": "error", "message": str(e)})
 
             elif command == "set_workspace":
                 new_path = data.get("path")
@@ -876,14 +924,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     state["last_workspace"] = fs_manager.workspace_path
                     save_ide_state(state)
                     
-                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+                    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                     
                     # Re-load config from new workspace
                     config_data = get_workspace_config(fs_manager.workspace_path)
                     if config_data:
-                        await websocket.send_json({"event": "config_loaded", "config": config_data})
+                        await safe_send(websocket,{"event": "config_loaded", "config": config_data})
                 else:
-                    await websocket.send_json({"event": "error", "message": "Invalid directory path"})
+                    await safe_send(websocket,{"event": "error", "message": "Invalid directory path"})
 
             elif command == "save_layout":
                 state["layout"] = data.get("layout", state.get("layout", {}))
@@ -905,20 +953,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     save_ide_state(state)
                     
                     files = fs_manager.list_files()
-                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+                    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Failed to save config: {str(e)}"})
+                    await safe_send(websocket,{"event": "error", "message": f"Failed to save config: {str(e)}"})
 
             elif command == "load_config":
                 try:
                     config_data = get_workspace_config(fs_manager.workspace_path)
                     if config_data:
-                        await websocket.send_json({"event": "config_loaded", "config": config_data})
-                        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Configuration loaded from workspace.", "stage": "origin"})
+                        await safe_send(websocket,{"event": "config_loaded", "config": config_data})
+                        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Configuration loaded from workspace.", "stage": "origin"})
                     else:
-                        await websocket.send_json({"event": "error", "message": "No swarm_config.json found in the current workspace/DB."})
+                        await safe_send(websocket,{"event": "error", "message": "No swarm_config.json found in the current workspace/DB."})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Failed to load config: {str(e)}"})
+                    await safe_send(websocket,{"event": "error", "message": f"Failed to load config: {str(e)}"})
 
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")
@@ -942,9 +990,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     new_path_safe = fs_manager._get_safe_path(os.path.relpath(new_path, fs_manager.workspace_path))
                     os.rename(old_path, new_path_safe)
                     files = fs_manager.list_files()
-                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+                    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Rename failed: {str(e)}"})
+                    await safe_send(websocket,{"event": "error", "message": f"Rename failed: {str(e)}"})
 
             elif command == "delete_file":
                 try:
@@ -955,9 +1003,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         os.remove(target_path)
                     files = fs_manager.list_files()
-                    await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
+                    await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path)})
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Delete failed: {str(e)}"})
+                    await safe_send(websocket,{"event": "error", "message": f"Delete failed: {str(e)}"})
 
             elif command == "reveal_in_finder":
                 try:
@@ -967,7 +1015,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     import subprocess
                     subprocess.Popen(["open", "-R", target_path])
                 except Exception as e:
-                    await websocket.send_json({"event": "error", "message": f"Reveal failed: {str(e)}"})
+                    await safe_send(websocket,{"event": "error", "message": f"Reveal failed: {str(e)}"})
 
     except WebSocketDisconnect:
         print("Client disconnected")
