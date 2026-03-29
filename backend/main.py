@@ -50,7 +50,7 @@ class LLMEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "max_tokens": 4000,
+            "max_tokens": 8192,
         }
         if is_json:
             kwargs["response_format"] = {"type": "json_object"}
@@ -75,7 +75,7 @@ class LLMEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "max_tokens": 4000,
+            "max_tokens": 8192,
             "stream": True,
         }
         if is_json:
@@ -391,6 +391,30 @@ async def _execute_live_swarm_logic(websocket: WebSocket, prompt: str, models: d
     artifact_dir = f"_swarm_artifacts/{run_timestamp}"
     os.makedirs(os.path.join(fs_manager.workspace_path, artifact_dir), exist_ok=True)
     
+    run_costs = {
+        "total_prompt_tokens": 0,
+        "total_completion_tokens": 0,
+        "total_cost_usd": 0.0,
+        "stages": {}
+    }
+
+    def update_run_costs(stage_name: str, model_id: str, usage):
+        payload = calculate_cost_payload(model_id, usage)
+        if not payload: return
+        
+        run_costs["total_prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["total_completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
+        
+        if stage_name not in run_costs["stages"]:
+            run_costs["stages"][stage_name] = {"model": model_id, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
+            
+        run_costs["stages"][stage_name]["prompt_tokens"] += payload.get("prompt_tokens", 0)
+        run_costs["stages"][stage_name]["completion_tokens"] += payload.get("completion_tokens", 0)
+        run_costs["stages"][stage_name]["cost_usd"] += payload.get("total_cost_usd", 0.0)
+        
+        fs_manager.write_file(f"{artifact_dir}/cost_breakdown.json", json.dumps(run_costs, indent=2))
+    
     # === Station 1: The Origin ===
     print("Starting station: origin")
     await safe_send(websocket,{
@@ -450,8 +474,7 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
         
         # Save Spec artifact
         fs_manager.write_file(f"{artifact_dir}/1_spec.md", spec)
-        cost_payload = calculate_cost_payload(active_model, usage)
-        fs_manager.write_file(f"{artifact_dir}/1_spec_cost.json", json.dumps(cost_payload, indent=2))
+        update_run_costs("1_specFactory", active_model, usage)
         files = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -511,8 +534,7 @@ Every file that needs to be created must appear in this graph. Files with no dep
         
         # Save Planner artifact
         fs_manager.write_file(f"{artifact_dir}/2_plan.md", plan)
-        cost_payload = calculate_cost_payload(active_model, usage)
-        fs_manager.write_file(f"{artifact_dir}/2_plan_cost.json", json.dumps(cost_payload, indent=2))
+        update_run_costs("2_planner", active_model, usage)
         files = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         
@@ -636,8 +658,7 @@ Output strictly a valid JSON object matching this schema:
     logging.info("[Station 3.5] Saving commander routing artifact")
     fs_manager.write_file(f"{artifact_dir}/2b_commander_routing.json", json.dumps(routing, indent=2))
     if commander_model and commander_usage:
-        cost_payload = calculate_cost_payload(commander_model, commander_usage)
-        fs_manager.write_file(f"{artifact_dir}/2b_commander_cost.json", json.dumps(cost_payload, indent=2))
+        update_run_costs("2b_commander", commander_model, commander_usage)
     files_list = fs_manager.list_files()
     await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "complete"})
@@ -815,7 +836,8 @@ CRITICAL OUTPUT INSTRUCTIONS:
 Return ONLY a valid JSON object: {{"files": [{{"path": "...", "content": "..."}}, ...]}}
 DO NOT wrap in markdown.
 ========================================="""
-            legacy_raw, _ = await llm.generate(legacy_sys, legacy_user, model_name=legacy_model)
+            legacy_raw, usage = await llm.generate(legacy_sys, legacy_user, model_name=legacy_model)
+            update_run_costs("3_executor", legacy_model, usage)
             clean_legacy = legacy_raw.strip()
             if clean_legacy.startswith("```json"): clean_legacy = clean_legacy[7:]
             elif clean_legacy.startswith("```"): clean_legacy = clean_legacy[3:]
@@ -850,12 +872,13 @@ DO NOT wrap in markdown.
             path = file_obj.get("path", "").strip()
             content = file_obj.get("content", "")
             if path:
-                fs_manager.write_file(path, content)
-                saved_files.append(path)
+                safe_path = path.lstrip("/")
+                full_path = f"{artifact_dir}/{safe_path}"
+                fs_manager.write_file(full_path, content)
+                saved_files.append(full_path)
 
         # Save executor raw artifact
         fs_manager.write_file(f"{artifact_dir}/3_executor_raw.json", json.dumps(all_generated, indent=2))
-        fs_manager.write_file(f"{artifact_dir}/3_executor_cost.json", json.dumps(executor_cost_data, indent=2))
 
         summary_text = f"✅ **Parallel Execution Complete!**\n\nGenerated {len(saved_files)} file(s) across all task forces:\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
         await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
@@ -884,8 +907,7 @@ Write a concise Markdown review document. Point out anything missing or incorrec
         qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
         
         fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
-        cost_payload = calculate_cost_payload(qa_model, qa_usage)
-        fs_manager.write_file(f"{artifact_dir}/4_qa_review_cost.json", json.dumps(cost_payload, indent=2))
+        update_run_costs("4_qaReviewer", qa_model, qa_usage)
         files_list = fs_manager.list_files()
         await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         await safe_send(websocket,{
