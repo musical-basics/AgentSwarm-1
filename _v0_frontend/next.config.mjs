@@ -3,6 +3,7 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  transpilePackages: ["@agentswarm/shared-swarm"],
   images: {
     unoptimized: true,
   },
