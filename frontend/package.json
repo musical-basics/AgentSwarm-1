@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@agentswarm/ui": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.10.2",
     "allotment": "^1.20.5",
