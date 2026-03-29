@@ -305,7 +305,22 @@ export function FlowmindIDE() {
           }
         } else if (data.event === "config_loaded") {
           if (data.config) {
-             setNodeModels(prev => ({ ...prev, ...data.config }));
+             setNodeModels(prev => {
+               const next = { ...prev };
+               for (const [key, value] of Object.entries(data.config)) {
+                 if (typeof value === "string") {
+                   // Upgrade legacy flat string config to tiered config
+                   next[key as keyof typeof next] = {
+                     easy: value,
+                     medium: value,
+                     hard: value
+                   };
+                 } else if (typeof value === "object" && value !== null) {
+                   next[key as keyof typeof next] = { ...((prev as any)[key] || {}), ...(value as any) };
+                 }
+               }
+               return next;
+             });
           }
         } else if (data.event === "layout_loaded") {
           if (data.layout) {
@@ -1307,7 +1322,7 @@ export function FlowmindIDE() {
                   <div className="max-w-xl mx-auto space-y-4">
                     <div className="flex items-center gap-2 mb-6">
                       <Settings2 className="w-5 h-5 text-[#a855f7]" />
-                      <h2 className="text-lg font-bold text-white tracking-wider uppercase">Node Configuration</h2>
+                      <h2 className="text-lg font-bold text-white tracking-wider uppercase">Node Configuration <span className="text-[9px] text-gray-500 lowercase ml-2">({modelOptions.length} models loaded)</span></h2>
                     </div>
 
                     {[
@@ -1746,24 +1761,23 @@ function NodeModelSelector({
   onChange: (val: string) => void; 
   options: {id: string, name: string, pricing?: any}[] 
 }) {
-  const currentCompany = value ? value.split('/')[0] : "";
-  const companies = Array.from(new Set(options.map(o => o.id.split('/')[0]))).sort((a, b) => a.localeCompare(b));
+  const currentCompany = value && typeof value === 'string' && value.includes('/') ? value.split('/')[0] : "";
+  const companies = Array.from(new Set((options || []).filter(o => o && o.id).map(o => o.id.split('/')[0]))).sort((a, b) => a.localeCompare(b));
   
   const handleCompanyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newCompany = e.target.value;
     if (newCompany) {
-       const firstModel = options.find(o => o.id.split('/')[0] === newCompany);
+       const firstModel = (options || []).find(o => o.id.split('/')[0] === newCompany);
        if (firstModel) onChange(firstModel.id);
     } else {
        onChange("");
     }
   };
 
-  const filteredOptions = currentCompany ? options.filter(o => o.id.split('/')[0] === currentCompany) : options;
+  const filteredOptions = currentCompany ? (options || []).filter(o => o.id.split('/')[0] === currentCompany) : (options || []);
 
   return (
     <div className="flex items-center gap-2">
-      {/* Provider Dropdown */}
       <select 
         value={currentCompany} 
         onChange={handleCompanyChange}
@@ -1773,9 +1787,8 @@ function NodeModelSelector({
         {companies.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       
-      {/* Model Dropdown */}
       <select 
-        value={value} 
+        value={value && typeof value === 'string' ? value : ""} 
         onChange={e => onChange(e.target.value)}
         className="bg-[#1a1a24] border border-[#a855f7]/30 text-white text-xs rounded-md px-2 py-1 outline-none cursor-pointer focus:border-[#a855f7]/80 transition-colors max-w-[200px] truncate"
         disabled={!currentCompany}
