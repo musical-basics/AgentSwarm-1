@@ -28,6 +28,7 @@ import {
   Download,
   Network,
   Eye,
+  XCircle,
 } from "lucide-react";
 
 type NodeStatus = "idle" | "active" | "complete";
@@ -409,6 +410,36 @@ export function FlowmindIDE() {
     }
   };
 
+
+  const handleExportChat = () => {
+    let mdContent = "# Agent Chat Export\n\n";
+    chatMessages.forEach(msg => {
+      const roleName = msg.role === 'user' ? 'User' : 'Agent (Swarm)';
+      mdContent += `### ${roleName}\n${msg.content}\n\n`;
+      if (msg.commands && msg.commands.length > 0) {
+        mdContent += "#### Executed Commands\n";
+        msg.commands.forEach(cmd => {
+          mdContent += `\`\`\`bash\n${cmd.cmd}\n\`\`\`\n`;
+          mdContent += `**Output:**\n\`\`\`\n${cmd.output}\n\`\`\`\n\n`;
+        });
+      }
+    });
+    const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.setAttribute("download", `chat_export_${timestamp}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleKillSwarm = () => {
+    if (socketRef.current) {
+      socketRef.current.send(JSON.stringify({ command: 'kill_swarm' }));
+    }
+  };
 
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -913,29 +944,45 @@ export function FlowmindIDE() {
                   Save Config
                 </motion.button>
 
-                <motion.button
-                  onClick={() => { if (chatInput.trim() && socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels })); else alert("Type a message to simulate swarm"); }}
-                  disabled={isSimulating}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: isSimulating 
-                      ? "linear-gradient(135deg, rgba(34,211,238,0.1) 0%, rgba(168,85,247,0.1) 100%)" 
-                      : "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
-                    border: "1px solid rgba(34,211,238,0.5)",
-                    boxShadow: isSimulating 
-                      ? "none" 
-                      : "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
-                    color: "#22d3ee",
-                  }}
-                  whileHover={!isSimulating ? { 
-                    scale: 1.05,
-                    boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)",
-                  } : {}}
-                  whileTap={!isSimulating ? { scale: 0.95 } : {}}
-                >
-                  <Play className={`w-3.5 h-3.5 ${isSimulating ? "animate-spin" : ""}`} />
-                  {isSimulating ? "Simulating..." : "Simulate Swarm"}
-                </motion.button>
+                {!isSimulating ? (
+                  <motion.button
+                    onClick={() => { if (chatInput.trim() && socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels })); else alert("Type a message to simulate swarm"); }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
+                      border: "1px solid rgba(34,211,238,0.5)",
+                      boxShadow: "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
+                      color: "#22d3ee",
+                    }}
+                    whileHover={{ 
+                      scale: 1.05,
+                      boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)",
+                    }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Simulate Swarm
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    onClick={handleKillSwarm}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(220,38,38,0.2) 100%)",
+                      border: "1px solid rgba(239,68,68,0.5)",
+                      boxShadow: "0 0 20px rgba(239,68,68,0.3), inset 0 0 20px rgba(239,68,68,0.1)",
+                      color: "#ef4444",
+                    }}
+                    whileHover={{ 
+                      scale: 1.05,
+                      boxShadow: "0 0 30px rgba(239,68,68,0.5), inset 0 0 30px rgba(239,68,68,0.2)",
+                    }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    Kill Swarm
+                  </motion.button>
+                )}
               </div>
 
               {/* Top Row: Origin → Spec Factory */}
@@ -1119,6 +1166,14 @@ export function FlowmindIDE() {
                   <option key={m.id} value={m.id} title={m.name}>{m.name?.replace(/^.*?\//, "").slice(0, 22) || m.id}</option>
                 ))}
               </select>
+              
+              <button 
+                onClick={handleExportChat}
+                className="text-[#22d3ee]/60 hover:text-[#22d3ee] transition-colors ml-1 p-1 rounded hover:bg-[#22d3ee]/10"
+                title="Export Chat to Markdown"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Messages */}

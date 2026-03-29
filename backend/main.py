@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 import httpx
 
-load_dotenv(".env.local")
+DOTENV_PATH = os.path.join(os.path.dirname(__file__), ".env.local")
+load_dotenv(DOTENV_PATH)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,16 +99,21 @@ active_ws_connections = set()
 active_pty_fds = set()
 ws_locks = {}
 cached_models = []
+active_swarm_tasks = {}
 
 async def fetch_openrouter_models():
     global cached_models
     if cached_models:
         return cached_models
     try:
+        api_key = os.getenv('OPENROUTER_API_KEY')
+        if not api_key:
+            print("WARNING: OPENROUTER_API_KEY is not set!")
+            
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"}
+                headers={"Authorization": f"Bearer {api_key}"}
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -115,8 +121,12 @@ async def fetch_openrouter_models():
                     sorted_data = sorted(data["data"], key=lambda x: x.get("name", "").lower())
                     cached_models = sorted_data
                     return cached_models
+            else:
+                print(f"OpenRouter API returned non-200 status: {resp.status_code} - {resp.text}")
     except Exception as e:
+        import traceback
         print(f"Failed to fetch models via backend proxy: {e}")
+        traceback.print_exc()
     return []
 
 def calculate_cost_payload(model_id: str, usage) -> dict:
@@ -379,10 +389,14 @@ Rules:
 async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: dict = None):
     try:
         await _execute_live_swarm_logic(websocket, message, models_dict)
+    except asyncio.CancelledError:
+        logging.info("Swarm execution cancelled by user")
     except Exception as e:
         logging.error(f"CRITICAL SWARM ERROR: {e}")
         await safe_send(websocket, {"event": "chat", "sender": "swarm", "text": f"CRITICAL CRASH: {str(e)}", "stage": "executor"})
         await safe_send(websocket, {"event": "workflow_complete"})
+    finally:
+        active_swarm_tasks.pop(websocket, None)
 
 async def _execute_live_swarm_logic(websocket: WebSocket, prompt: str, models: dict):
 
@@ -1114,7 +1128,22 @@ async def websocket_endpoint(websocket: WebSocket):
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")
                 models_dict = data.get("models", {})
-                asyncio.create_task(execute_live_swarm(websocket, msg, models_dict))
+                
+                # Cancel any existing task for this websocket before starting a new one
+                old_task = active_swarm_tasks.get(websocket)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                    
+                task = asyncio.create_task(execute_live_swarm(websocket, msg, models_dict))
+                active_swarm_tasks[websocket] = task
+
+            elif command == "kill_swarm":
+                task = active_swarm_tasks.get(websocket)
+                if task and not task.done():
+                    task.cancel()
+                    await safe_send(websocket, {"event": "chat", "sender": "swarm", "text": "🛑 **Swarm execution forcefully terminated by user.**", "stage": "executor"})
+                    await safe_send(websocket, {"event": "workflow_complete"})
+                    active_swarm_tasks.pop(websocket, None)
 
             elif command == "chat_message":
                 msg = data.get("message", "")
