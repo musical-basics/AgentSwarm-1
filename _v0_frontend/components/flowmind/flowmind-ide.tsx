@@ -26,6 +26,7 @@ import {
   GripHorizontal,
   Save,
   Download,
+  Network,
 } from "lucide-react";
 
 type NodeStatus = "idle" | "active" | "complete";
@@ -34,6 +35,7 @@ interface NodeState {
   origin: NodeStatus;
   specFactory: NodeStatus;
   planner: NodeStatus;
+  commander: NodeStatus;
   executor: NodeStatus;
   qaReviewer: NodeStatus;
 }
@@ -41,7 +43,8 @@ interface NodeState {
 interface ConnectionState {
   originToSpec: boolean;
   specToPlanner: boolean;
-  plannerToExecutor: boolean;
+  plannerToCommander: boolean;
+  commanderToExecutor: boolean;
   executorToQa: boolean;
 }
 
@@ -130,6 +133,7 @@ export function FlowmindIDE() {
     origin: "idle",
     specFactory: "idle",
     planner: "idle",
+    commander: "idle",
     executor: "idle",
     qaReviewer: "idle",
   });
@@ -165,7 +169,8 @@ export function FlowmindIDE() {
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     originToSpec: false,
     specToPlanner: false,
-    plannerToExecutor: false,
+    plannerToCommander: false,
+    commanderToExecutor: false,
     executorToQa: false,
   });
 
@@ -193,7 +198,11 @@ export function FlowmindIDE() {
     origin: "google/gemini-2.5-flash",
     specFactory: "anthropic/claude-3-haiku",
     planner: "google/gemini-2.5-flash",
+    commander: "google/gemini-2.5-flash",
     executor: "anthropic/claude-3-haiku",
+    executorWizard: "anthropic/claude-3.5-sonnet",
+    executorSpecialist: "google/gemini-2.5-flash",
+    executorSwarm: "anthropic/claude-3-haiku",
     qaReviewer: "google/gemini-2.5-flash",
   });
 
@@ -341,16 +350,18 @@ export function FlowmindIDE() {
           } else if (data.station === "specFactory" && data.status === "complete") {
              setConnectionState(prev => ({...prev, originToSpec: false, specToPlanner: true }));
           } else if (data.station === "planner" && data.status === "complete") {
-             setConnectionState(prev => ({ ...prev, specToPlanner: false, plannerToExecutor: true }));
+             setConnectionState(prev => ({ ...prev, specToPlanner: false, plannerToCommander: true }));
+          } else if (data.station === "commander" && data.status === "complete") {
+             setConnectionState(prev => ({ ...prev, plannerToCommander: false, commanderToExecutor: true }));
           } else if (data.station === "executor" && data.status === "complete") {
-             setConnectionState(prev => ({ ...prev, plannerToExecutor: false, executorToQa: true }));
+             setConnectionState(prev => ({ ...prev, commanderToExecutor: false, executorToQa: true }));
           } else if (data.station === "qaReviewer" && data.status === "complete") {
              setConnectionState(prev => ({ ...prev, executorToQa: false }));
           }
         } else if (data.event === "workflow_start") {
           setIsSimulating(true);
-          setNodeState({ origin: "idle", specFactory: "idle", planner: "idle", executor: "idle", qaReviewer: "idle" });
-          setConnectionState({ originToSpec: false, specToPlanner: false, plannerToExecutor: false, executorToQa: false });
+          setNodeState({ origin: "idle", specFactory: "idle", planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" });
+          setConnectionState({ originToSpec: false, specToPlanner: false, plannerToCommander: false, commanderToExecutor: false, executorToQa: false });
         } else if (data.event === "workflow_complete") {
           setIsSimulating(false);
           setChatMessages(prev => [...prev, { role: "agent" as any, content: "Swarm workflow complete! Ready for next task." }]);
@@ -919,12 +930,12 @@ export function FlowmindIDE() {
               </div>
 
               {/* Vertical connection */}
-              <div className="flex justify-center mb-6 mt-4">
+              <div className="flex justify-center mb-4 mt-4">
                 <VerticalConnectionLine active={connectionState.specToPlanner} />
               </div>
 
-              {/* Bottom Row: Planner and Executor */}
-              <div className="flex items-center gap-4 mt-8">
+              {/* Middle Row: Planner → Commander */}
+              <div className="flex items-center gap-4">
                 <div className="relative">
                   <NodeModelSelector value={nodeModels.planner} onChange={v => setNodeModels(p => ({...p, planner: v}))} options={modelOptions} />
                   <WorkflowNode
@@ -934,15 +945,60 @@ export function FlowmindIDE() {
                     icon={<TeamIcon status={nodeState.planner} />}
                   />
                 </div>
-                <ConnectionLine active={connectionState.plannerToExecutor} />
+                <ConnectionLine active={connectionState.plannerToCommander} />
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.executor} onChange={v => setNodeModels(p => ({...p, executor: v}))} options={modelOptions} />
+                  <NodeModelSelector value={nodeModels.commander} onChange={v => setNodeModels(p => ({...p, commander: v}))} options={modelOptions} />
                   <WorkflowNode
-                    title="EXECUTOR"
-                    status={nodeState.executor}
-                    color="amber"
-                    icon={<CodeIcon status={nodeState.executor} />}
+                    title="COMMANDER"
+                    status={nodeState.commander}
+                    color="indigo"
+                    icon={<CommanderIcon status={nodeState.commander} />}
                   />
+                </div>
+              </div>
+
+              {/* Vertical connection to executor row */}
+              <div className="flex justify-center mt-4 mb-4">
+                <VerticalConnectionLine active={connectionState.commanderToExecutor} />
+              </div>
+
+              {/* Bottom Row: Executor sub-models + QA */}
+              <div className="flex items-center gap-3">
+                {/* Executor cluster */}
+                <div className="flex flex-col items-center gap-1 border border-[#fbbf24]/20 rounded-xl p-2" style={{ background: "rgba(251,191,36,0.04)" }}>
+                  <span className="text-[8px] text-[#fbbf24]/60 font-bold uppercase tracking-wider mb-1">EXECUTOR TASK FORCES</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[7px] text-[#a855f7]/70 uppercase tracking-wider">Wizard</span>
+                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
+                      <WorkflowNode
+                        title="WIZARD"
+                        status={nodeState.executor}
+                        color="amber"
+                        icon={<CodeIcon status={nodeState.executor} />}
+                      />
+                    </div>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[7px] text-[#22d3ee]/70 uppercase tracking-wider">Specialist</span>
+                      <NodeModelSelector value={nodeModels.executorSpecialist} onChange={v => setNodeModels(p => ({...p, executorSpecialist: v}))} options={modelOptions} />
+                      <WorkflowNode
+                        title="SPECIALIST"
+                        status={nodeState.executor}
+                        color="cyan"
+                        icon={<TeamIcon status={nodeState.executor} />}
+                      />
+                    </div>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <span className="text-[7px] text-[#34d399]/70 uppercase tracking-wider">Swarm</span>
+                      <NodeModelSelector value={nodeModels.executorSwarm} onChange={v => setNodeModels(p => ({...p, executorSwarm: v}))} options={modelOptions} />
+                      <WorkflowNode
+                        title="SWARM"
+                        status={nodeState.executor}
+                        color="emerald"
+                        icon={<SwarmIcon status={nodeState.executor} />}
+                      />
+                    </div>
+                  </div>
                 </div>
                 <ConnectionLine active={connectionState.executorToQa} />
                 <div className="relative">
@@ -1383,7 +1439,7 @@ function WorkflowNode({
 }: {
   title: string;
   status: NodeStatus;
-  color: "cyan" | "purple" | "emerald" | "amber" | "rose";
+  color: "cyan" | "purple" | "emerald" | "amber" | "rose" | "indigo";
   icon: React.ReactNode;
 }) {
   const colorMap = {
@@ -1416,6 +1472,12 @@ function WorkflowNode({
       border: "#f43f5e",
       bg: "rgba(244,63,94,0.15)",
       text: "#f43f5e",
+    },
+    indigo: {
+      glow: "0 0 30px rgba(99,102,241,0.6), 0 0 60px rgba(99,102,241,0.4), 0 0 90px rgba(99,102,241,0.2)",
+      border: "#6366f1",
+      bg: "rgba(99,102,241,0.15)",
+      text: "#6366f1",
     },
   };
 
@@ -1765,6 +1827,56 @@ function CodeIcon({ status }: { status: NodeStatus }) {
   );
 }
 
+// Commander Icon - Network / Routing
+function CommanderIcon({ status }: { status: NodeStatus }) {
+  return (
+    <motion.div
+      className="relative"
+      animate={status === "active" ? { rotate: [0, 360] } : {}}
+      transition={{ duration: 3, repeat: status === "active" ? Infinity : 0, ease: "linear" }}
+    >
+      <Network
+        className="w-8 h-8 transition-colors duration-300"
+        style={{
+          color: status === "idle" ? "#606060" : status === "active" ? "#6366f1" : "#6366f199",
+          filter: status !== "idle" ? "drop-shadow(0 0 6px rgba(99,102,241,0.7))" : "none",
+        }}
+      />
+      {status === "active" && (
+        <motion.div
+          className="absolute inset-0 flex items-center justify-center"
+          animate={{ scale: [1, 1.6, 1], opacity: [0.6, 0, 0.6] }}
+          transition={{ duration: 1, repeat: Infinity }}
+        >
+          <Network className="w-8 h-8 text-[#6366f1]" />
+        </motion.div>
+      )}
+    </motion.div>
+  );
+}
+
+// Swarm Icon - parallel dots
+function SwarmIcon({ status }: { status: NodeStatus }) {
+  return (
+    <div className="relative flex items-center justify-center">
+      <div className="grid grid-cols-3 gap-0.5">
+        {[0,1,2,3,4,5,6,7,8].map((i) => (
+          <motion.div
+            key={i}
+            className="w-2 h-2 rounded-full"
+            style={{
+              background: status === "idle" ? "#404040" : status === "active" ? "#34d399" : "#34d39966",
+              boxShadow: status === "active" ? "0 0 4px rgba(52,211,153,0.6)" : "none",
+            }}
+            animate={status === "active" ? { opacity: [1, 0.3, 1], scale: [1, 1.3, 1] } : {}}
+            transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.07 }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Chat Bubble with Stage Colors
 function ChatBubble({ 
   message, 
@@ -1777,7 +1889,9 @@ function ChatBubble({
     origin: { color: "#22d3ee", glow: "0 0 10px rgba(34,211,238,0.3)" },
     specFactory: { color: "#a855f7", glow: "0 0 10px rgba(168,85,247,0.3)" },
     planner: { color: "#34d399", glow: "0 0 10px rgba(52,211,153,0.3)" },
+    commander: { color: "#6366f1", glow: "0 0 10px rgba(99,102,241,0.3)" },
     executor: { color: "#fbbf24", glow: "0 0 10px rgba(251,191,36,0.3)" },
+    qaReviewer: { color: "#f43f5e", glow: "0 0 10px rgba(244,63,94,0.3)" },
   };
 
   const stageStyle = message.stage ? stageColors[message.stage] : null;

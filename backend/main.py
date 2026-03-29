@@ -420,7 +420,14 @@ You must define:
 2. Exact data flow between components.
 3. API Contracts (Inputs, Outputs, and Types for every single function).
 4. Step-by-step logic for complex algorithms.
-Ensure the logic handles the edge cases defined in the PRD."""
+Ensure the logic handles the edge cases defined in the PRD.
+
+CRITICAL FINAL STEP: At the very end of your plan, you MUST output a strict JSON block wrapped in ```json containing the Topological Dependency Graph of the entire required codebase. This is MANDATORY.
+Schema:
+```json
+{"topological_graph": [{"file_path": "backend/api.py", "description": "FastAPI routes", "depends_on": ["backend/models.py"]}]}
+```
+Every file that needs to be created must appear in this graph. Files with no dependencies should have an empty depends_on list. Be exhaustive."""
         
         # Accumulate payload
         user_prompt = f"ORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}"
@@ -441,11 +448,114 @@ Ensure the logic handles the edge cases defined in the PRD."""
         plan = "Fallback Plan: Proceed to execution."
     await websocket.send_json({"event": "station_update", "station": "planner", "status": "complete"})
 
-    # === Station 4: EXECUTOR ===
+    # === Extract Topological Graph from Planner output ===
+    topological_graph = []
+    topo_match = re.search(r'```json\s*(\{.*?\})\s*```', plan, re.DOTALL)
+    if topo_match:
+        try:
+            topo_data = json.loads(topo_match.group(1))
+            topological_graph = topo_data.get("topological_graph", [])
+            print(f"[Commander] Extracted topological graph with {len(topological_graph)} files.")
+        except json.JSONDecodeError:
+            print("[Commander] Failed to parse topological graph JSON.")
+    else:
+        print("[Commander] No topological graph found in planner output — will use fallback.")
+
+    # === Station 3.5: COMMANDER AI ===
+    print("Starting station: commander")
+    await websocket.send_json({"event": "station_update", "station": "commander", "status": "active"})
+    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Commander AI analyzing dependency graph and routing files to task forces...", "stage": "commander"})
+
+    routing = {"wizard_clusters": [], "specialist_pairs": [], "swarm_files": []}
+
+    if topological_graph:
+        try:
+            commander_model = models.get("commander", "google/gemini-2.5-flash")
+            commander_sys = """You are the Commander AI (Dynamic Execution Router).
+Analyze the provided Topological Dependency Graph and assign EVERY file to a specific "Task Force" execution strategy based on code coupling.
+
+STRATEGIES:
+1. "wizard_clusters": Tightly coupled files (core logic, DB schemas, shared state). A single high-context model writes them together.
+2. "specialist_pairs": API contracts (Producer/Consumer). Requires exactly two files (e.g., Backend Route + Frontend Hook) that must handshake perfectly.
+3. "swarm_files": Isolated files with ZERO unwritten dependencies (UI components, utils, static docs). Generated in complete parallel.
+
+RULES:
+- EVERY file from the graph MUST be assigned to exactly ONE strategy.
+- You can create multiple wizard_clusters if there are separate highly-coupled systems.
+- specialist_pairs must have exactly one "producer" and one "consumer".
+
+Output strictly a valid JSON object matching this schema:
+{
+  "routing": {
+    "wizard_clusters": [
+      {
+        "cluster_name": "Core System",
+        "files": ["backend/main.py", "backend/models.py"]
+      }
+    ],
+    "specialist_pairs": [
+      {
+        "bridge_name": "User API Bridge",
+        "producer": "backend/api/users.py",
+        "consumer": "frontend/hooks/useUsers.ts"
+      }
+    ],
+    "swarm_files": [
+      "frontend/components/Button.tsx",
+      "README.md"
+    ]
+  }
+}"""
+            commander_user = f"TOPOLOGICAL DEPENDENCY GRAPH:\n{json.dumps(topological_graph, indent=2)}"
+            
+            commander_raw, commander_usage = await llm.generate(
+                commander_sys, commander_user, model_name=commander_model, is_json=True
+            )
+
+            # Strip any markdown wrappers
+            clean_commander = commander_raw.strip()
+            if clean_commander.startswith("```json"): clean_commander = clean_commander[7:]
+            elif clean_commander.startswith("```"): clean_commander = clean_commander[3:]
+            if clean_commander.endswith("```"): clean_commander = clean_commander[:-3]
+            clean_commander = clean_commander.strip()
+
+            commander_data = json.loads(clean_commander)
+            routing = commander_data.get("routing", routing)
+
+            wizard_count = len(routing.get("wizard_clusters", []))
+            specialist_count = len(routing.get("specialist_pairs", []))
+            swarm_count = len(routing.get("swarm_files", []))
+
+            summary = f"**Commander Routing Plan:**\n- 🧙 {wizard_count} Wizard Cluster(s)\n- 🤝 {specialist_count} Specialist Pair(s)\n- ⚡ {swarm_count} Swarm File(s)"
+            await websocket.send_json({
+                "event": "chat", "sender": "swarm", "text": summary, "stage": "commander",
+                "usage": {"prompt_tokens": commander_usage.prompt_tokens, "completion_tokens": commander_usage.completion_tokens, "model": commander_model}
+            })
+
+        except Exception as e:
+            print(f"[Commander] Error: {e}. Using fallback routing.")
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"Commander routing failed ({str(e)}). Using fallback: single wizard cluster.", "stage": "commander"})
+            # Fallback: dump everything into one wizard cluster
+            all_files = [item["file_path"] for item in topological_graph if "file_path" in item]
+            if all_files:
+                routing = {"wizard_clusters": [{"cluster_name": "Fallback Cluster", "files": all_files}], "specialist_pairs": [], "swarm_files": []}
+    else:
+        # No graph at all — Commander will pass through; Executor will be full-context
+        await websocket.send_json({"event": "chat", "sender": "swarm", "text": "No dependency graph available. Commander delegating full-context generation to Wizard.", "stage": "commander"})
+
+    # Save commander routing artifact
+    fs_manager.write_file(f"{artifact_dir}/2b_commander_routing.json", json.dumps(routing, indent=2))
+    files_list = fs_manager.list_files()
+    await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    await websocket.send_json({"event": "station_update", "station": "commander", "status": "complete"})
+
+    # === Station 4: TRI-TIER EXECUTOR ===
     print("Starting station: executor")
     await websocket.send_json({"event": "station_update", "station": "executor", "status": "active"})
+    await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Commander deployed. Executing parallel task forces...", "stage": "executor"})
+
     try:
-        # Flatten workspace list to inject environment context
+        # Build shared context
         def flatten_files(node_list, path=""):
             res = []
             for item in node_list:
@@ -455,18 +565,11 @@ Ensure the logic handles the edge cases defined in the PRD."""
                 else:
                     res.append(full_path)
             return res
-            
+
         existing_files = flatten_files(fs_manager.list_files())
         existing_files_str = "\n".join(existing_files) if existing_files else "No files exist currently."
 
-        active_model = models.get("executor", "anthropic/claude-3-haiku")
-        sys_prompt = """You are the Senior Execution Drone.
-Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
-CRITICAL MANDATE: NO CONVERSATIONAL FILLER. Do not explain your code. Do not say "Here is the code."
-Ensure all imports are present and the code is complete, not truncated."""
-        
-        # Accumulating Payload + Context Injection
-        user_prompt = f"""CURRENT WORKSPACE FILES:
+        shared_context = f"""CURRENT WORKSPACE FILES:
 {existing_files_str}
 
 ORIGINAL REQUEST:
@@ -476,83 +579,174 @@ SPEC (PRD):
 {spec}
 
 ARCHITECT PLAN:
-{plan}
+{plan}"""
+
+        # ---- Sub-Routine A: Wizard (tight-coupling, multi-file) ----
+        async def execute_wizard(cluster: dict, context: str, model: str) -> list:
+            cluster_name = cluster.get("cluster_name", "Unnamed Cluster")
+            files_list_str = "\n".join(f"- {f}" for f in cluster.get("files", []))
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"🧙 [Wizard] Generating cluster: **{cluster_name}** ({len(cluster.get('files', []))} files)...", "stage": "executor"})
+
+            wizard_sys = """You are the One-Shot Wizard (High-Context Code Generator).
+You will write ALL files in this cluster simultaneously with full shared context.
+CRITICAL: Return ONLY a valid JSON object with this schema:
+{"files": [{"path": "path/to/file.ext", "content": "raw file content here"}]}
+DO NOT wrap in markdown. DO NOT add any explanations."""
+            wizard_user = f"{context}\n\nWRITE THESE FILES AS A CLUSTER (they are tightly coupled):\n{files_list_str}"
+
+            try:
+                raw, _ = await llm.generate(wizard_sys, wizard_user, model_name=model)
+                clean = raw.strip()
+                if clean.startswith("```json"): clean = clean[7:]
+                elif clean.startswith("```"): clean = clean[3:]
+                if clean.endswith("```"): clean = clean[:-3]
+                data = json.loads(clean.strip())
+                result = data.get("files", [])
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"✅ [Wizard] Cluster **{cluster_name}** complete: {len(result)} file(s) generated.", "stage": "executor"})
+                return result
+            except Exception as e:
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Wizard] Cluster **{cluster_name}** failed: {str(e)}", "stage": "executor"})
+                return []
+
+        # ---- Sub-Routine B: Specialist (producer → consumer ping-pong) ----
+        async def execute_specialist(pair: dict, context: str, model: str) -> list:
+            bridge_name = pair.get("bridge_name", "Unnamed Bridge")
+            producer_path = pair.get("producer", "")
+            consumer_path = pair.get("consumer", "")
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"🤝 [Specialist] Generating bridge: **{bridge_name}** ({producer_path} → {consumer_path})...", "stage": "executor"})
+
+            # Step 1: Generate producer
+            producer_sys = """You are a Backend Specialist. Write ONLY this single file.
+Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
+DO NOT wrap in markdown."""
+            producer_user = f"{context}\n\nWRITE THIS PRODUCER FILE ONLY: {producer_path}"
+
+            produced_code = ""
+            result = []
+            try:
+                raw, _ = await llm.generate(producer_sys, producer_user, model_name=model)
+                clean = raw.strip()
+                if clean.startswith("```json"): clean = clean[7:]
+                elif clean.startswith("```"): clean = clean[3:]
+                if clean.endswith("```"): clean = clean[:-3]
+                producer_data = json.loads(clean.strip())
+                produced_code = producer_data.get("content", "")
+                result.append({"path": producer_path, "content": produced_code})
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"  → Producer `{producer_path}` done.", "stage": "executor"})
+            except Exception as e:
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Producer `{producer_path}` failed: {str(e)}", "stage": "executor"})
+
+            # Step 2: Generate consumer using producer code as context
+            consumer_sys = """You are a Frontend Specialist. Write ONLY this single consumer file.
+The backend has already generated its code. Match its API contract perfectly.
+Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
+DO NOT wrap in markdown."""
+            consumer_user = f"{context}\n\nThe Backend generated this exact code for `{producer_path}`:\n\n```\n{produced_code}\n```\n\nWRITE THIS CONSUMER FILE to perfectly match it: {consumer_path}"
+
+            try:
+                raw, _ = await llm.generate(consumer_sys, consumer_user, model_name=model)
+                clean = raw.strip()
+                if clean.startswith("```json"): clean = clean[7:]
+                elif clean.startswith("```"): clean = clean[3:]
+                if clean.endswith("```"): clean = clean[:-3]
+                consumer_data = json.loads(clean.strip())
+                result.append({"path": consumer_path, "content": consumer_data.get("content", "")})
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"  → Consumer `{consumer_path}` done. Bridge **{bridge_name}** complete.", "stage": "executor"})
+            except Exception as e:
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Consumer `{consumer_path}` failed: {str(e)}", "stage": "executor"})
+
+            return result
+
+        # ---- Sub-Routine C: Swarm Worker (single isolated file) ----
+        async def execute_swarm_worker(filepath: str, context: str, model: str) -> list:
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚡ [Swarm] Generating `{filepath}`...", "stage": "executor"})
+            swarm_sys = """You are a Swarm Worker. Generate ONLY this single isolated file.
+Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
+DO NOT wrap in markdown. NO explanations."""
+            swarm_user = f"{context}\n\nGENERATE ONLY THIS FILE: {filepath}"
+            try:
+                raw, _ = await llm.generate(swarm_sys, swarm_user, model_name=model)
+                clean = raw.strip()
+                if clean.startswith("```json"): clean = clean[7:]
+                elif clean.startswith("```"): clean = clean[3:]
+                if clean.endswith("```"): clean = clean[:-3]
+                data = json.loads(clean.strip())
+                return [{"path": data.get("path", filepath), "content": data.get("content", "")}]
+            except Exception as e:
+                await websocket.send_json({"event": "chat", "sender": "swarm", "text": f"⚠️ [Swarm] `{filepath}` failed: {str(e)}", "stage": "executor"})
+                return []
+
+        # ---- Orchestrate with asyncio.gather ----
+        wizard_model = models.get("executorWizard", models.get("executor", "anthropic/claude-3.5-sonnet"))
+        specialist_model = models.get("executorSpecialist", models.get("executor", "google/gemini-2.5-flash"))
+        swarm_model = models.get("executorSwarm", models.get("executor", "anthropic/claude-3-haiku"))
+
+        # If no routing was produced (no topo graph), fall back to legacy single-wizard approach
+        wizard_clusters = routing.get("wizard_clusters", [])
+        specialist_pairs = routing.get("specialist_pairs", [])
+        swarm_files = routing.get("swarm_files", [])
+
+        if not wizard_clusters and not specialist_pairs and not swarm_files:
+            # Full fallback: use legacy single-model executor
+            await websocket.send_json({"event": "chat", "sender": "swarm", "text": "No routing data. Falling back to full-context single-model generation...", "stage": "executor"})
+            legacy_model = models.get("executor", "anthropic/claude-3-haiku")
+            legacy_sys = """You are the Senior Execution Drone.
+Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
+CRITICAL MANDATE: NO CONVERSATIONAL FILLER. Do not explain your code. Do not say \"Here is the code.\"
+Ensure all imports are present and the code is complete, not truncated."""
+            legacy_user = f"""{shared_context}
 
 =========================================
 CRITICAL OUTPUT INSTRUCTIONS:
-You MUST return your response as a single, valid JSON object. 
-DO NOT wrap the JSON in markdown code blocks. DO NOT include any conversational text.
-Use this exact schema:
-{{
-  "files": [
-    {{
-      "path": "relative/path/filename.ext",
-      "content": "raw file content here"
-    }}
-  ]
-}}
-=========================================
-"""
-        
-        code_output = ""
-        seen_paths = set()
-        import re
-        
-        await websocket.send_json({"event": "chat_stream_start", "sender": "swarm", "text": "Writing code natively...\n\n```json\n", "stage": "executor"})
-        
-        async for chunk_text in llm.generate_stream(sys_prompt, user_prompt, model_name=active_model, is_json=True):
-            code_output += chunk_text
-            await websocket.send_json({"event": "chat_stream_chunk", "sender": "swarm", "text": chunk_text, "stage": "executor"})
-            
-            matches = re.findall(r'"path"\s*:\s*"([^"]+)"', code_output)
-            new_paths = [m for m in matches if m not in seen_paths]
-            if new_paths:
-                for np in new_paths:
-                    seen_paths.add(np)
-                    fs_manager.write_file(np, "")
-                files = fs_manager.list_files()
-                await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-        
-        usage = type('Usage', (), {'prompt_tokens': 0, 'completion_tokens': 0})()
-        
-        # Save Executor Raw artifact
-        fs_manager.write_file(f"{artifact_dir}/3_executor_raw.md", code_output)
-        
-        # JSON Extraction
-        import json
-        clean_output = code_output.strip()
-        if clean_output.startswith("```json"):
-            clean_output = clean_output[7:]
-        elif clean_output.startswith("```"):
-            clean_output = clean_output[3:]
-        if clean_output.endswith("```"):
-            clean_output = clean_output[:-3]
-        clean_output = clean_output.strip()
-        
-        try:
-            parsed_data = json.loads(clean_output)
-            files_to_save = parsed_data.get("files", [])
-        except json.JSONDecodeError as e:
-            files_to_save = []
-            
+Return ONLY a valid JSON object: {{"files": [{{"path": "...", "content": "..."}}, ...]}}
+DO NOT wrap in markdown.
+========================================="""
+            legacy_raw, _ = await llm.generate(legacy_sys, legacy_user, model_name=legacy_model)
+            clean_legacy = legacy_raw.strip()
+            if clean_legacy.startswith("```json"): clean_legacy = clean_legacy[7:]
+            elif clean_legacy.startswith("```"): clean_legacy = clean_legacy[3:]
+            if clean_legacy.endswith("```"): clean_legacy = clean_legacy[:-3]
+            try:
+                legacy_data = json.loads(clean_legacy.strip())
+                all_generated = legacy_data.get("files", [])
+            except:
+                all_generated = []
+        else:
+            tasks = []
+            for cluster in wizard_clusters:
+                tasks.append(execute_wizard(cluster, shared_context, wizard_model))
+            for pair in specialist_pairs:
+                tasks.append(execute_specialist(pair, shared_context, specialist_model))
+            for filepath in swarm_files:
+                tasks.append(execute_swarm_worker(filepath, shared_context, swarm_model))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Flatten results
+            all_generated = []
+            for res in results:
+                if isinstance(res, list):
+                    all_generated.extend(res)
+                elif isinstance(res, Exception):
+                    print(f"[Executor] Task error: {res}")
+
+        # Write all files
         saved_files = []
-        for file_obj in files_to_save:
+        for file_obj in all_generated:
             path = file_obj.get("path", "").strip()
             content = file_obj.get("content", "")
             if path:
-                # Use fs_manager strictly for boundary-safe recursive writing
                 fs_manager.write_file(path, content)
                 saved_files.append(path)
-            
-        text_out = f"\n```\n\nGenerated files physically successfully into workspace:\n" + "\n".join([f"- {sf}" for sf in saved_files]) if saved_files else "\n```\n\nNo files found in JSON output."
-            
-        await websocket.send_json({
-            "event": "chat_stream_chunk", "sender": "swarm", "text": text_out, "stage": "executor", 
-            "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
-        })
-        files = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-        
+
+        # Save executor raw artifact
+        fs_manager.write_file(f"{artifact_dir}/3_executor_raw.json", json.dumps(all_generated, indent=2))
+
+        summary_text = f"✅ **Parallel Execution Complete!**\n\nGenerated {len(saved_files)} file(s) across all task forces:\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
+        await websocket.send_json({"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
+        files_list = fs_manager.list_files()
+        await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+
         # === Station 4.5: QA REVIEWER ===
         await websocket.send_json({"event": "station_update", "station": "qaReviewer", "status": "active"})
         await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Reviewing codebase for architectural alignment...", "stage": "qaReviewer"})
@@ -575,8 +769,8 @@ Write a concise Markdown review document. Point out anything missing or incorrec
         qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
         
         fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
-        files = fs_manager.list_files()
-        await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+        files_list = fs_manager.list_files()
+        await websocket.send_json({"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
         await websocket.send_json({
             "event": "chat", "sender": "swarm", "text": qa_output, "stage": "qaReviewer",
             "usage": {"prompt_tokens": qa_usage.prompt_tokens, "completion_tokens": qa_usage.completion_tokens, "model": qa_model}
@@ -596,10 +790,9 @@ Schema:
 }"""
         runner_user_prompt = f"PLAN:\n{plan}\n\nGENERATED FILES:\n{saved_files}"
         
-        runner_output, _ = await llm.generate(runner_sys_prompt, runner_user_prompt, model_name=active_model, is_json=True)
+        runner_output, _ = await llm.generate(runner_sys_prompt, runner_user_prompt, model_name=models.get("executor", "anthropic/claude-3-haiku"), is_json=True)
         
         # Parse JSON
-        import json
         clean_runner_output = runner_output.strip()
         if clean_runner_output.startswith("```json"): clean_runner_output = clean_runner_output[7:]
         elif clean_runner_output.startswith("```"): clean_runner_output = clean_runner_output[3:]
