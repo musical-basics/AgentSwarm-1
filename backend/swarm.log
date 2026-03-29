@@ -59,3 +59,45 @@ RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/N
 2026-03-28 19:10:40,173 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
 2026-03-28 19:10:41,609 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
 2026-03-28 19:10:41,657 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:21:23,353 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 19:21:26,448 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 19:38:08,727 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 19:38:11,497 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 19:40:31,683 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:40:56,128 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:41:23,335 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:41:25,485 - INFO - [LLM Generate] Starting request to model: anthropic/claude-sonnet-4.6, is_json: False
+2026-03-28 19:41:26,178 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:42:45,803 - INFO - [LLM Generate] Success for model: anthropic/claude-sonnet-4.6
+2026-03-28 19:42:45,805 - INFO - [Station 3] Starting station: planner
+2026-03-28 19:42:45,805 - INFO - [Station 3] Using planner model: anthropic/claude-sonnet-4.6
+2026-03-28 19:42:45,805 - INFO - [LLM Generate] Starting request to model: anthropic/claude-sonnet-4.6, is_json: False
+2026-03-28 19:42:48,943 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:43:51,992 - INFO - [LLM Generate] Success for model: anthropic/claude-sonnet-4.6
+2026-03-28 19:43:51,994 - INFO - [Station 3] Extracting Topological Graph
+2026-03-28 19:43:51,994 - WARNING - [Commander] No topological graph found in planner output — will use fallback.
+2026-03-28 19:43:51,994 - INFO - [Station 3.5] Starting station: commander
+2026-03-28 19:43:51,994 - INFO - [Station 3.5] No dependency graph available handling pass-through
+2026-03-28 19:43:51,994 - INFO - [Station 3.5] Saving commander routing artifact
+2026-03-28 19:43:51,995 - INFO - [Station 4] Starting station: executor
+2026-03-28 19:43:51,996 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 19:43:53,423 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:44:12,359 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:44:12,361 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 19:44:13,623 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:44:19,278 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:44:19,279 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 19:44:20,564 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:44:32,229 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:46:08,392 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:48:30,731 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"

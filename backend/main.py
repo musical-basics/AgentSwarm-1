@@ -501,84 +501,173 @@ Do not write implementation details. Define the 'What' and the 'Why', never the 
     
     # Complete specFactory
     await safe_send(websocket,{"event": "station_update", "station": "specFactory", "status": "complete"})
-    
-    # === Station 3: PLANNER ===
-    logging.info("[Station 3] Starting station: planner")
-    print("Starting station: planner")
-    await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "active"})
-    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Planning architecture and layout...", "stage": "planner"})
+
+    # === Station 2.5: OVERSEER ===
+    logging.info("[Station 2.5] Starting station: overseer")
+    await safe_send(websocket, {"event": "station_update", "station": "overseer", "status": "active"})
+    await safe_send(websocket, {"event": "chat", "sender": "swarm", "text": "🧠 **Overseer** analysing PRD and creating Implementation Chunks...", "stage": "overseer"})
+
+    overseer_data = {"chunks": []}
+    overseer_model = models.get("overseer", "google/gemini-2.5-flash")
     try:
-        active_model = models.get("planner", "google/gemini-2.5-flash")
-        logging.info(f"[Station 3] Using planner model: {active_model}")
-        sys_prompt = """You are the Senior Systems Architect (Planner). 
-Take the PRD and write an exhaustive, function-by-function architectural plan in Markdown.
-CRITICAL MANDATE: DO NOT WRITE EXECUTABLE CODE. You must use pseudo-code and architectural diagrams.
+        overseer_sys = """You are the Overseer AI (Agile Product Manager).
+Your job is to read the full Product Requirements Document (PRD) and break it down into sequential, manageable "Implementation Chunks" (Sprints).
+Rule 1: Chunks MUST be strictly sequential. (e.g., Chunk 1: Database/Config. Chunk 2: Backend APIs. Chunk 3: Frontend UI).
+Rule 2: Output strictly valid JSON.
+
+Schema:
+{
+  "chunks": [
+    {
+      "chunk_id": 1,
+      "title": "Core Data Models",
+      "description": "Extracted specifications from the PRD relevant ONLY to this chunk. Be highly detailed."
+    }
+  ]
+}"""
+        overseer_user = f"FULL PRD:\n{spec}"
+        overseer_raw, overseer_usage = await llm.generate(overseer_sys, overseer_user, model_name=overseer_model, is_json=True)
+        update_run_costs("2_overseer", overseer_model, overseer_usage)
+
+        # Strip markdown wrappers
+        clean_overseer = overseer_raw.strip()
+        if clean_overseer.startswith("```json"): clean_overseer = clean_overseer[7:]
+        elif clean_overseer.startswith("```"): clean_overseer = clean_overseer[3:]
+        if clean_overseer.endswith("```"): clean_overseer = clean_overseer[:-3]
+        clean_overseer = clean_overseer.strip()
+
+        overseer_data = json.loads(clean_overseer)
+        fs_manager.write_file(f"{artifact_dir}/2_overseer_chunks.json", json.dumps(overseer_data, indent=2))
+
+        chunk_count = len(overseer_data.get("chunks", []))
+        await safe_send(websocket, {
+            "event": "chat", "sender": "swarm",
+            "text": f"✅ **Overseer** identified **{chunk_count} Implementation Chunk(s)**:\n" +
+                    "\n".join(f"  {c['chunk_id']}. {c['title']}" for c in overseer_data.get("chunks", [])),
+            "stage": "overseer",
+            "usage": {"prompt_tokens": overseer_usage.prompt_tokens, "completion_tokens": overseer_usage.completion_tokens, "model": overseer_model}
+        })
+    except Exception as e:
+        logging.error(f"[Overseer] Failed: {e}. Falling back to single chunk.")
+        await safe_send(websocket, {"event": "chat", "sender": "swarm", "text": f"⚠️ Overseer failed ({str(e)}). Falling back to single-chunk execution.", "stage": "overseer"})
+        overseer_data = {"chunks": [{"chunk_id": 1, "title": "Full Project", "description": spec}]}
+        fs_manager.write_file(f"{artifact_dir}/2_overseer_chunks.json", json.dumps(overseer_data, indent=2))
+
+    files = fs_manager.list_files()
+    await safe_send(websocket, {"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
+    await safe_send(websocket, {"event": "station_update", "station": "overseer", "status": "complete"})
+
+    # Extract chunks list
+    chunks = overseer_data.get("chunks", [])
+    if not chunks:
+        chunks = [{"chunk_id": 1, "title": "Full Project", "description": spec}]
+    total_chunks = len(chunks)
+
+    # Rolling architecture ledger path (relative to workspace)
+    ledger_path = f"{artifact_dir}/global_architecture_ledger.md"
+    fs_manager.write_file(ledger_path, f"# Global Architecture Ledger\n\nGenerated during swarm run: {artifact_dir}\n\n")
+
+    # Helper: flatten file tree to a list of paths
+    def flatten_files(node_list, path=""):
+        res = []
+        for item in node_list:
+            full_path = path + item["name"]
+            if item.get("is_dir"):
+                res.extend(flatten_files(item.get("children", []), full_path + "/"))
+            else:
+                res.append(full_path)
+        return res
+
+    for index, chunk in enumerate(chunks):
+        chunk_num = index + 1
+        chunk_title = chunk.get("title", f"Chunk {chunk_num}")
+        chunk_desc = chunk.get("description", "")
+        
+        # 1. Reset downstream UI for the new chunk
+        await safe_send(websocket, {"event": "chunk_start", "chunk_title": chunk_title})
+        
+        # 2. Broadcast to Chat
+        await safe_send(websocket, {
+            "event": "chat", 
+            "sender": "swarm", 
+            "text": f"🔄 **[Overseer] Releasing Chunk {chunk_num}/{total_chunks}: {chunk_title}**\nFocus: {chunk_desc}", 
+            "stage": "overseer"
+        })
+
+        # Dynamically read existing files into context
+        existing_files = flatten_files(fs_manager.list_files())
+        existing_files_str = "\n".join(existing_files) if existing_files else "No files exist currently."
+
+        # Read the current Architecture Ledger
+        try:
+            ledger_content = fs_manager.read_file(ledger_path)
+        except Exception:
+            ledger_content = "No previous architecture defined."
+
+        # === Station 3: PLANNER ===
+        logging.info(f"[Station 3] Starting planner for chunk {chunk_num}")
+        await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "active"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Planning architecture for Chunk {chunk_num} ({chunk_title})...", "stage": "planner"})
+        
+        try:
+            active_model = models.get("planner", "google/gemini-2.5-flash")
+            sys_prompt = f"""You are the Senior Systems Architect (Planner). 
+You are planning architecture for CHUNK {chunk_num} of {total_chunks}.
+Create a Topological Dependency Graph ONLY for the new files required in THIS chunk. Do not replan existing files.
+CRITICAL MANDATE: DO NOT WRITE EXECUTABLE CODE. Use pseudo-code and architectural diagrams.
+
 You must define:
 1. Data Models and State Management.
 2. Exact data flow between components.
 3. API Contracts (Inputs, Outputs, and Types for every single function).
-4. Step-by-step logic for complex algorithms.
-Ensure the logic handles the edge cases defined in the PRD.
 
 CRITICAL FINAL STEP: At the very end of your plan, you MUST output a strict JSON block wrapped in ```json containing the Topological Dependency Graph of the entire required codebase. This is MANDATORY.
 Schema:
 ```json
-{"topological_graph": [{"file_path": "backend/api.py", "description": "FastAPI routes", "depends_on": ["backend/models.py"]}]}
+{{"topological_graph": [{{"file_path": "backend/api.py", "description": "FastAPI routes", "depends_on": ["backend/models.py"]}}]}}
 ```
-Every file that needs to be created must appear in this graph. Files with no dependencies should have an empty depends_on list. Be exhaustive."""
+Every file that needs to be created must appear in this graph. Be exhaustive."""
+            
+            user_prompt = f"CHUNK DESCRIPTION Focus:\n{chunk_desc}\n\nEXISTING WORKSPACE FILES (Do not replan these):\n{existing_files_str}\n\nGLOBAL ARCHITECTURE SO FAR:\n{ledger_content}"
+            
+            plan, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
+            
+            fs_manager.write_file(f"{artifact_dir}/3_plan_chunk_{chunk_num}.md", plan)
+            update_run_costs(f"3_planner_chunk_{chunk_num}", active_model, usage)
+            
+            await safe_send(websocket,{
+                "event": "chat", "sender": "swarm", "text": plan, "stage": "planner", 
+                "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
+            })
+        except Exception as e:
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Planner Error: {str(e)}", "stage": "planner"})
+            plan = "Fallback Plan: Proceed to execution."
         
-        # Accumulate payload
-        user_prompt = f"ORIGINAL REQUEST:\n{prompt}\n\nSPEC (PRD):\n{spec}"
-        
-        plan, usage = await llm.generate(sys_prompt, user_prompt, model_name=active_model)
-        
-        # Save Planner artifact
-        fs_manager.write_file(f"{artifact_dir}/2_plan.md", plan)
-        update_run_costs("2_planner", active_model, usage)
-        files = fs_manager.list_files()
-        await safe_send(websocket,{"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-        
-        await safe_send(websocket,{
-            "event": "chat", "sender": "swarm", "text": plan, "stage": "planner", 
-            "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens, "model": active_model}
-        })
-    except Exception as e:
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Planner Error: {str(e)}", "stage": "planner"})
-        plan = "Fallback Plan: Proceed to execution."
-    await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "complete"})
+        await safe_send(websocket,{"event": "station_update", "station": "planner", "status": "complete"})
 
-    # === Extract Topological Graph from Planner output ===
-    logging.info("[Station 3] Extracting Topological Graph")
-    topological_graph = []
-    topo_match = re.search(r'```json\s*(\{.*?\})\s*```', plan, re.DOTALL)
-    if topo_match:
-        try:
-            topo_data = json.loads(topo_match.group(1))
-            topological_graph = topo_data.get("topological_graph", [])
-            logging.info(f"[Commander] Extracted topological graph with {len(topological_graph)} files.")
-            print(f"[Commander] Extracted topological graph with {len(topological_graph)} files.")
-        except json.JSONDecodeError as e:
-            logging.error(f"[Commander] Failed to parse topological graph JSON: {e}")
-            print("[Commander] Failed to parse topological graph JSON.")
-    else:
-        logging.warning("[Commander] No topological graph found in planner output — will use fallback.")
-        print("[Commander] No topological graph found in planner output — will use fallback.")
+        # Extract Topological Graph from Planner output
+        topological_graph = []
+        topo_match = re.search(r'```json\s*(\{.*?\})\s*```', plan, re.DOTALL)
+        if topo_match:
+            try:
+                topo_data = json.loads(topo_match.group(1))
+                topological_graph = topo_data.get("topological_graph", [])
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse topological graph JSON: {e}")
 
-    # === Station 3.5: COMMANDER AI ===
-    logging.info("[Station 3.5] Starting station: commander")
-    print("Starting station: commander")
-    await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "active"})
-    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander AI analyzing dependency graph and routing files to task forces...", "stage": "commander"})
+        # === Station 3.5: COMMANDER AI ===
+        logging.info(f"[Station 3.5] Starting commander for chunk {chunk_num}")
+        await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "active"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander routing dependency graph to task forces...", "stage": "commander"})
 
-    commander_model = None
-    commander_usage = None
-    routing = {"wizard_clusters": [], "specialist_pairs": [], "swarm_files": []}
+        commander_model = None
+        commander_usage = None
+        routing = {"wizard_clusters": [], "specialist_pairs": [], "swarm_files": []}
 
-    if topological_graph:
-        logging.info("[Station 3.5] Topological graph found, generating routing")
-        try:
-            commander_model = models.get("commander", "google/gemini-2.5-flash")
-            commander_sys = """You are the Commander AI (Dynamic Execution Router).
+        if topological_graph:
+            try:
+                commander_model = models.get("commander", "google/gemini-2.5-flash")
+                commander_sys = """You are the Commander AI (Dynamic Execution Router).
 Analyze the provided Topological Dependency Graph and assign EVERY file to a specific "Task Force" execution strategy based on code coupling.
 
 STRATEGIES:
@@ -586,378 +675,315 @@ STRATEGIES:
 2. "specialist_pairs": API contracts (Producer/Consumer). Requires exactly two files (e.g., Backend Route + Frontend Hook) that must handshake perfectly.
 3. "swarm_files": Isolated files with ZERO unwritten dependencies (UI components, utils, static docs). Generated in complete parallel.
 
-RULES:
-- EVERY file from the graph MUST be assigned to exactly ONE strategy.
-- You can create multiple wizard_clusters if there are separate highly-coupled systems.
-- specialist_pairs must have exactly one "producer" and one "consumer".
-
 Output strictly a valid JSON object matching this schema:
 {
   "routing": {
-    "wizard_clusters": [
-      {
-        "cluster_name": "Core System",
-        "files": ["backend/main.py", "backend/models.py"]
-      }
-    ],
-    "specialist_pairs": [
-      {
-        "bridge_name": "User API Bridge",
-        "producer": "backend/api/users.py",
-        "consumer": "frontend/hooks/useUsers.ts"
-      }
-    ],
-    "swarm_files": [
-      "frontend/components/Button.tsx",
-      "README.md"
-    ]
+    "wizard_clusters": [{"cluster_name": "Core System", "files": ["backend/main.py"]}],
+    "specialist_pairs": [{"bridge_name": "User API Bridge", "producer": "backend/users.py", "consumer": "frontend/useUsers.ts"}],
+    "swarm_files": ["README.md"]
   }
 }"""
-            commander_user = f"TOPOLOGICAL DEPENDENCY GRAPH:\n{json.dumps(topological_graph, indent=2)}"
-            
-            logging.info(f"[Station 3.5] Calling LLM with model {commander_model}")
-            commander_raw, commander_usage = await llm.generate(
-                commander_sys, commander_user, model_name=commander_model, is_json=True
-            )
-            logging.info(f"[Station 3.5] LLM generation success. Raw response length: {len(commander_raw)}")
+                commander_user = f"TOPOLOGICAL DEPENDENCY GRAPH:\n{json.dumps(topological_graph, indent=2)}"
+                
+                commander_raw, commander_usage = await llm.generate(
+                    commander_sys, commander_user, model_name=commander_model, is_json=True
+                )
 
-            # Strip any markdown wrappers
-            clean_commander = commander_raw.strip()
-            if clean_commander.startswith("```json"): clean_commander = clean_commander[7:]
-            elif clean_commander.startswith("```"): clean_commander = clean_commander[3:]
-            if clean_commander.endswith("```"): clean_commander = clean_commander[:-3]
-            clean_commander = clean_commander.strip()
+                clean_commander = commander_raw.strip()
+                if clean_commander.startswith("```json"): clean_commander = clean_commander[7:]
+                elif clean_commander.startswith("```"): clean_commander = clean_commander[3:]
+                if clean_commander.endswith("```"): clean_commander = clean_commander[:-3]
 
-            commander_data = json.loads(clean_commander)
-            routing = commander_data.get("routing", routing)
+                commander_data = json.loads(clean_commander.strip())
+                routing = commander_data.get("routing", routing)
 
-            wizard_count = len(routing.get("wizard_clusters", []))
-            specialist_count = len(routing.get("specialist_pairs", []))
-            swarm_count = len(routing.get("swarm_files", []))
+                wizard_count = len(routing.get("wizard_clusters", []))
+                specialist_count = len(routing.get("specialist_pairs", []))
+                swarm_count = len(routing.get("swarm_files", []))
 
-            summary = f"**Commander Routing Plan:**\n- 🧙 {wizard_count} Wizard Cluster(s)\n- 🤝 {specialist_count} Specialist Pair(s)\n- ⚡ {swarm_count} Swarm File(s)"
-            await safe_send(websocket,{
-                "event": "chat", "sender": "swarm", "text": summary, "stage": "commander",
-                "usage": {"prompt_tokens": commander_usage.prompt_tokens, "completion_tokens": commander_usage.completion_tokens, "model": commander_model}
-            })
+                summary = f"**Commander Routing Plan:**\n- 🧙 {wizard_count} Wizard Cluster(s)\n- 🤝 {specialist_count} Specialist Pair(s)\n- ⚡ {swarm_count} Swarm File(s)"
+                await safe_send(websocket,{
+                    "event": "chat", "sender": "swarm", "text": summary, "stage": "commander",
+                    "usage": {"prompt_tokens": commander_usage.prompt_tokens, "completion_tokens": commander_usage.completion_tokens, "model": commander_model}
+                })
 
-        except Exception as e:
-            logging.error(f"[Commander] Error: {e}. Using fallback routing.")
-            print(f"[Commander] Error: {e}. Using fallback routing.")
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Commander routing failed ({str(e)}). Using fallback: single wizard cluster.", "stage": "commander"})
-            # Fallback: dump everything into one wizard cluster
-            all_files = [item["file_path"] for item in topological_graph if "file_path" in item]
-            if all_files:
-                routing = {"wizard_clusters": [{"cluster_name": "Fallback Cluster", "files": all_files}], "specialist_pairs": [], "swarm_files": []}
-    else:
-        # No graph at all — Commander will pass through; Executor will be full-context
-        logging.info("[Station 3.5] No dependency graph available handling pass-through")
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "No dependency graph available. Commander delegating full-context generation to Wizard.", "stage": "commander"})
+            except Exception as e:
+                logging.error(f"[Commander] Error: {e}. Using fallback routing.")
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Commander routing failed ({str(e)}). Using fallback: single wizard cluster.", "stage": "commander"})
+                all_files = [item["file_path"] for item in topological_graph if "file_path" in item]
+                if all_files:
+                    routing = {"wizard_clusters": [{"cluster_name": f"Fallback Cluster Chunk {chunk_num}", "files": all_files}], "specialist_pairs": [], "swarm_files": []}
+        
+        fs_manager.write_file(f"{artifact_dir}/3b_commander_routing_chunk_{chunk_num}.json", json.dumps(routing, indent=2))
+        if commander_model and commander_usage:
+            update_run_costs(f"4_commander_chunk_{chunk_num}", commander_model, commander_usage)
+        await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "complete"})
 
-    # Save commander routing artifact
-    logging.info("[Station 3.5] Saving commander routing artifact")
-    fs_manager.write_file(f"{artifact_dir}/2b_commander_routing.json", json.dumps(routing, indent=2))
-    if commander_model and commander_usage:
-        update_run_costs("2b_commander", commander_model, commander_usage)
-    files_list = fs_manager.list_files()
-    await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-    await safe_send(websocket,{"event": "station_update", "station": "commander", "status": "complete"})
+        # === Station 4: TRI-TIER EXECUTOR ===
+        logging.info(f"[Station 4] Starting executor for chunk {chunk_num}")
+        await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "active"})
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Executing parallel task forces for Chunk {chunk_num}...", "stage": "executor"})
 
-    # === Station 4: TRI-TIER EXECUTOR ===
-    logging.info("[Station 4] Starting station: executor")
-    print("Starting station: executor")
-    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "active"})
-    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Commander deployed. Executing parallel task forces...", "stage": "executor"})
-
-    try:
-        # Build shared context
-        def flatten_files(node_list, path=""):
-            res = []
-            for item in node_list:
-                full_path = path + item["name"]
-                if item.get("is_dir"):
-                    res.extend(flatten_files(item.get("children", []), full_path + "/"))
-                else:
-                    res.append(full_path)
-            return res
-
-        existing_files = flatten_files(fs_manager.list_files())
-        existing_files_str = "\n".join(existing_files) if existing_files else "No files exist currently."
-
-        shared_context = f"""CURRENT WORKSPACE FILES:
+        try:
+            shared_context = f"""CURRENT WORKSPACE FILES:
 {existing_files_str}
 
-ORIGINAL REQUEST:
-{prompt}
+CHUNK FOCUS:
+{chunk_desc}
 
-SPEC (PRD):
-{spec}
+ARCHITECT PLAN FOR THIS CHUNK:
+{plan}
 
-ARCHITECT PLAN:
-{plan}"""
+GLOBAL ARCHITECTURE SO FAR:
+{ledger_content}
+"""
 
-        executor_cost_data = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_cost_usd": 0.0,
-            "models_used": []
-        }
+            executor_cost_data = {"prompt_tokens": 0, "completion_tokens": 0, "total_cost_usd": 0.0, "models_used": []}
 
-        def record_executor_cost(model: str, usage):
-            payload = calculate_cost_payload(model, usage)
-            if payload:
-                executor_cost_data["prompt_tokens"] += payload.get("prompt_tokens", 0)
-                executor_cost_data["completion_tokens"] += payload.get("completion_tokens", 0)
-                executor_cost_data["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
-                if model not in executor_cost_data["models_used"]:
-                    executor_cost_data["models_used"].append(model)
+            def record_executor_cost(model: str, usage):
+                payload = calculate_cost_payload(model, usage)
+                if payload:
+                    executor_cost_data["prompt_tokens"] += payload.get("prompt_tokens", 0)
+                    executor_cost_data["completion_tokens"] += payload.get("completion_tokens", 0)
+                    executor_cost_data["total_cost_usd"] += payload.get("total_cost_usd", 0.0)
+                    if model not in executor_cost_data["models_used"]:
+                        executor_cost_data["models_used"].append(model)
 
-        # ---- Sub-Routine A: Wizard (tight-coupling, multi-file) ----
-        async def execute_wizard(cluster: dict, context: str, model: str) -> list:
-            cluster_name = cluster.get("cluster_name", "Unnamed Cluster")
-            files_list_str = "\n".join(f"- {f}" for f in cluster.get("files", []))
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🧙 [Wizard] Generating cluster: **{cluster_name}** ({len(cluster.get('files', []))} files)...", "stage": "executor"})
+            async def execute_wizard(cluster: dict, context: str, model: str) -> list:
+                cluster_name = cluster.get("cluster_name", "Unnamed Cluster")
+                files_list_str = "\n".join(f"- {f}" for f in cluster.get("files", []))
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🧙 Generating cluster: **{cluster_name}** ({len(cluster.get('files', []))} files)...", "stage": "executor"})
 
-            wizard_sys = """You are the One-Shot Wizard (High-Context Code Generator).
-You will write ALL files in this cluster simultaneously with full shared context.
+                wizard_sys = """You are the One-Shot Wizard. Write ALL files in this cluster simultaneously.
 CRITICAL: Return ONLY a valid JSON object with this schema:
 {"files": [{"path": "path/to/file.ext", "content": "raw file content here"}]}
-DO NOT wrap in markdown. DO NOT add any explanations."""
-            wizard_user = f"{context}\n\nWRITE THESE FILES AS A CLUSTER (they are tightly coupled):\n{files_list_str}"
+DO NOT wrap in markdown."""
+                wizard_user = f"{context}\n\nWRITE THESE FILES AS A CLUSTER:\n{files_list_str}"
 
-            try:
-                raw, usage = await llm.generate(wizard_sys, wizard_user, model_name=model)
-                record_executor_cost(model, usage)
-                clean = raw.strip()
-                if clean.startswith("```json"): clean = clean[7:]
-                elif clean.startswith("```"): clean = clean[3:]
-                if clean.endswith("```"): clean = clean[:-3]
-                data = json.loads(clean.strip())
-                result = data.get("files", [])
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"✅ [Wizard] Cluster **{cluster_name}** complete: {len(result)} file(s) generated.", "stage": "executor"})
+                try:
+                    raw, usage = await llm.generate(wizard_sys, wizard_user, model_name=model)
+                    record_executor_cost(model, usage)
+                    clean = raw.strip()
+                    if clean.startswith("```json"): clean = clean[7:]
+                    elif clean.startswith("```"): clean = clean[3:]
+                    if clean.endswith("```"): clean = clean[:-3]
+                    data = json.loads(clean.strip())
+                    return data.get("files", [])
+                except Exception as e:
+                    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ Cluster **{cluster_name}** failed: {str(e)}", "stage": "executor"})
+                    return []
+
+            async def execute_specialist(pair: dict, context: str, model: str) -> list:
+                bridge_name = pair.get("bridge_name", "Unnamed Bridge")
+                producer_path = pair.get("producer", "")
+                consumer_path = pair.get("consumer", "")
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🤝 Generating bridge: **{bridge_name}** ({producer_path} → {consumer_path})...", "stage": "executor"})
+
+                producer_sys = """You are a Backend Specialist. Write ONLY this single file.
+Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
+DO NOT wrap in markdown."""
+                producer_user = f"{context}\n\nWRITE THIS PRODUCER FILE ONLY: {producer_path}"
+
+                produced_code = ""
+                result = []
+                try:
+                    raw, usage = await llm.generate(producer_sys, producer_user, model_name=model)
+                    record_executor_cost(model, usage)
+                    clean = raw.strip()
+                    if clean.startswith("```json"): clean = clean[7:]
+                    elif clean.startswith("```"): clean = clean[3:]
+                    if clean.endswith("```"): clean = clean[:-3]
+                    producer_data = json.loads(clean.strip())
+                    produced_code = producer_data.get("content", "")
+                    result.append({"path": producer_path, "content": produced_code})
+                except Exception:
+                    pass
+
+                consumer_sys = """You are a Frontend Specialist. Write ONLY this single consumer file.
+The backend generated its code. Match its API perfectly.
+Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
+DO NOT wrap in markdown."""
+                consumer_user = f"{context}\n\nBackend generated:\n\n```\n{produced_code}\n```\n\nWRITE CONSUMER FILE: {consumer_path}"
+
+                try:
+                    raw, usage = await llm.generate(consumer_sys, consumer_user, model_name=model)
+                    record_executor_cost(model, usage)
+                    clean = raw.strip()
+                    if clean.startswith("```json"): clean = clean[7:]
+                    elif clean.startswith("```"): clean = clean[3:]
+                    if clean.endswith("```"): clean = clean[:-3]
+                    consumer_data = json.loads(clean.strip())
+                    result.append({"path": consumer_path, "content": consumer_data.get("content", "")})
+                except Exception:
+                    pass
+
                 return result
-            except Exception as e:
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Wizard] Cluster **{cluster_name}** failed: {str(e)}", "stage": "executor"})
-                return []
 
-        # ---- Sub-Routine B: Specialist (producer → consumer ping-pong) ----
-        async def execute_specialist(pair: dict, context: str, model: str) -> list:
-            bridge_name = pair.get("bridge_name", "Unnamed Bridge")
-            producer_path = pair.get("producer", "")
-            consumer_path = pair.get("consumer", "")
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"🤝 [Specialist] Generating bridge: **{bridge_name}** ({producer_path} → {consumer_path})...", "stage": "executor"})
-
-            # Step 1: Generate producer
-            producer_sys = """You are a Backend Specialist. Write ONLY this single file.
+            async def execute_swarm_worker(filepath: str, context: str, model: str) -> list:
+                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚡ Generating `{filepath}`...", "stage": "executor"})
+                swarm_sys = """You are a Swarm Worker. Generate ONLY this single isolated file.
 Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
 DO NOT wrap in markdown."""
-            producer_user = f"{context}\n\nWRITE THIS PRODUCER FILE ONLY: {producer_path}"
+                swarm_user = f"{context}\n\nGENERATE ONLY THIS FILE: {filepath}"
+                try:
+                    raw, usage = await llm.generate(swarm_sys, swarm_user, model_name=model)
+                    record_executor_cost(model, usage)
+                    clean = raw.strip()
+                    if clean.startswith("```json"): clean = clean[7:]
+                    elif clean.startswith("```"): clean = clean[3:]
+                    if clean.endswith("```"): clean = clean[:-3]
+                    data = json.loads(clean.strip())
+                    return [{"path": data.get("path", filepath), "content": data.get("content", "")}]
+                except Exception:
+                    return []
 
-            produced_code = ""
-            result = []
-            try:
-                raw, usage = await llm.generate(producer_sys, producer_user, model_name=model)
-                record_executor_cost(model, usage)
-                clean = raw.strip()
-                if clean.startswith("```json"): clean = clean[7:]
-                elif clean.startswith("```"): clean = clean[3:]
-                if clean.endswith("```"): clean = clean[:-3]
-                producer_data = json.loads(clean.strip())
-                produced_code = producer_data.get("content", "")
-                result.append({"path": producer_path, "content": produced_code})
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"  → Producer `{producer_path}` done.", "stage": "executor"})
-            except Exception as e:
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Producer `{producer_path}` failed: {str(e)}", "stage": "executor"})
+            wizard_model = models.get("executorWizard", models.get("executor", "anthropic/claude-3.5-sonnet"))
+            specialist_model = models.get("executorSpecialist", models.get("executor", "google/gemini-2.5-flash"))
+            swarm_model = models.get("executorSwarm", models.get("executor", "anthropic/claude-3-haiku"))
 
-            # Step 2: Generate consumer using producer code as context
-            consumer_sys = """You are a Frontend Specialist. Write ONLY this single consumer file.
-The backend has already generated its code. Match its API contract perfectly.
-Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
-DO NOT wrap in markdown."""
-            consumer_user = f"{context}\n\nThe Backend generated this exact code for `{producer_path}`:\n\n```\n{produced_code}\n```\n\nWRITE THIS CONSUMER FILE to perfectly match it: {consumer_path}"
+            wizard_clusters = routing.get("wizard_clusters", [])
+            specialist_pairs = routing.get("specialist_pairs", [])
+            swarm_files = routing.get("swarm_files", [])
 
-            try:
-                raw, usage = await llm.generate(consumer_sys, consumer_user, model_name=model)
-                record_executor_cost(model, usage)
-                clean = raw.strip()
-                if clean.startswith("```json"): clean = clean[7:]
-                elif clean.startswith("```"): clean = clean[3:]
-                if clean.endswith("```"): clean = clean[:-3]
-                consumer_data = json.loads(clean.strip())
-                result.append({"path": consumer_path, "content": consumer_data.get("content", "")})
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"  → Consumer `{consumer_path}` done. Bridge **{bridge_name}** complete.", "stage": "executor"})
-            except Exception as e:
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Specialist] Consumer `{consumer_path}` failed: {str(e)}", "stage": "executor"})
+            if not wizard_clusters and not specialist_pairs and not swarm_files:
+                legacy_model = models.get("executor", "anthropic/claude-3-haiku")
+                legacy_sys = "You are the Senior Execution Drone. Return ONLY a valid JSON object: {\"files\": [{\"path\": \"...\", \"content\": \"...\"}]} DO NOT wrap in markdown."
+                legacy_user = f"{shared_context}\n\n=========================================\nCRITICAL OUTPUT INSTRUCTIONS:\nReturn ONLY a valid JSON object without markdown wrappers.\n========================================="
+                legacy_raw, usage = await llm.generate(legacy_sys, legacy_user, model_name=legacy_model)
+                update_run_costs(f"4_executor_chunk_{chunk_num}", legacy_model, usage)
+                clean_legacy = legacy_raw.strip()
+                if clean_legacy.startswith("```json"): clean_legacy = clean_legacy[7:]
+                elif clean_legacy.startswith("```"): clean_legacy = clean_legacy[3:]
+                if clean_legacy.endswith("```"): clean_legacy = clean_legacy[:-3]
+                try:
+                    all_generated = json.loads(clean_legacy.strip()).get("files", [])
+                except:
+                    all_generated = []
+            else:
+                tasks = []
+                for cluster in wizard_clusters: tasks.append(execute_wizard(cluster, shared_context, wizard_model))
+                for pair in specialist_pairs: tasks.append(execute_specialist(pair, shared_context, specialist_model))
+                for filepath in swarm_files: tasks.append(execute_swarm_worker(filepath, shared_context, swarm_model))
 
-            return result
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Add usage from parallel executions to the master cost ledger
+                for used_model in executor_cost_data["models_used"]:
+                    pseudo_usage = type('Usage', (), {'prompt_tokens': executor_cost_data['prompt_tokens'], 'completion_tokens': executor_cost_data['completion_tokens']})()
+                    update_run_costs(f"4_executor_chunk_{chunk_num}_{used_model.split('/')[1]}", used_model, pseudo_usage)
 
-        # ---- Sub-Routine C: Swarm Worker (single isolated file) ----
-        async def execute_swarm_worker(filepath: str, context: str, model: str) -> list:
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚡ [Swarm] Generating `{filepath}`...", "stage": "executor"})
-            swarm_sys = """You are a Swarm Worker. Generate ONLY this single isolated file.
-Return ONLY valid JSON: {"path": "path/to/file", "content": "file content"}
-DO NOT wrap in markdown. NO explanations."""
-            swarm_user = f"{context}\n\nGENERATE ONLY THIS FILE: {filepath}"
-            try:
-                raw, usage = await llm.generate(swarm_sys, swarm_user, model_name=model)
-                record_executor_cost(model, usage)
-                clean = raw.strip()
-                if clean.startswith("```json"): clean = clean[7:]
-                elif clean.startswith("```"): clean = clean[3:]
-                if clean.endswith("```"): clean = clean[:-3]
-                data = json.loads(clean.strip())
-                return [{"path": data.get("path", filepath), "content": data.get("content", "")}]
-            except Exception as e:
-                await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"⚠️ [Swarm] `{filepath}` failed: {str(e)}", "stage": "executor"})
-                return []
-
-        # ---- Orchestrate with asyncio.gather ----
-        wizard_model = models.get("executorWizard", models.get("executor", "anthropic/claude-3.5-sonnet"))
-        specialist_model = models.get("executorSpecialist", models.get("executor", "google/gemini-2.5-flash"))
-        swarm_model = models.get("executorSwarm", models.get("executor", "anthropic/claude-3-haiku"))
-
-        # If no routing was produced (no topo graph), fall back to legacy single-wizard approach
-        wizard_clusters = routing.get("wizard_clusters", [])
-        specialist_pairs = routing.get("specialist_pairs", [])
-        swarm_files = routing.get("swarm_files", [])
-
-        if not wizard_clusters and not specialist_pairs and not swarm_files:
-            # Full fallback: use legacy single-model executor
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "No routing data. Falling back to full-context single-model generation...", "stage": "executor"})
-            legacy_model = models.get("executor", "anthropic/claude-3-haiku")
-            legacy_sys = """You are the Senior Execution Drone.
-Read the PRD and the Architect Plan, and translate them flawlessly into executable code.
-CRITICAL MANDATE: NO CONVERSATIONAL FILLER. Do not explain your code. Do not say \"Here is the code.\"
-Ensure all imports are present and the code is complete, not truncated."""
-            legacy_user = f"""{shared_context}
-
-=========================================
-CRITICAL OUTPUT INSTRUCTIONS:
-Return ONLY a valid JSON object: {{"files": [{{"path": "...", "content": "..."}}, ...]}}
-DO NOT wrap in markdown.
-========================================="""
-            legacy_raw, usage = await llm.generate(legacy_sys, legacy_user, model_name=legacy_model)
-            update_run_costs("3_executor", legacy_model, usage)
-            clean_legacy = legacy_raw.strip()
-            if clean_legacy.startswith("```json"): clean_legacy = clean_legacy[7:]
-            elif clean_legacy.startswith("```"): clean_legacy = clean_legacy[3:]
-            if clean_legacy.endswith("```"): clean_legacy = clean_legacy[:-3]
-            try:
-                legacy_data = json.loads(clean_legacy.strip())
-                all_generated = legacy_data.get("files", [])
-            except:
                 all_generated = []
-        else:
-            tasks = []
-            for cluster in wizard_clusters:
-                tasks.append(execute_wizard(cluster, shared_context, wizard_model))
-            for pair in specialist_pairs:
-                tasks.append(execute_specialist(pair, shared_context, specialist_model))
-            for filepath in swarm_files:
-                tasks.append(execute_swarm_worker(filepath, shared_context, swarm_model))
+                for res in results:
+                    if isinstance(res, list): all_generated.extend(res)
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            saved_files = []
+            for file_obj in all_generated:
+                path = file_obj.get("path", "").strip()
+                content = file_obj.get("content", "")
+                if path:
+                    safe_path = path.lstrip("/")
+                    full_path = f"{artifact_dir}/{safe_path}"
+                    fs_manager.write_file(full_path, content)
+                    saved_files.append(full_path)
 
-            # Flatten results
-            all_generated = []
-            for res in results:
-                if isinstance(res, list):
-                    all_generated.extend(res)
-                elif isinstance(res, Exception):
-                    print(f"[Executor] Task error: {res}")
+            fs_manager.write_file(f"{artifact_dir}/4_executor_raw_chunk_{chunk_num}.json", json.dumps(all_generated, indent=2))
 
-        # Write all files
-        saved_files = []
-        for file_obj in all_generated:
-            path = file_obj.get("path", "").strip()
-            content = file_obj.get("content", "")
-            if path:
-                safe_path = path.lstrip("/")
-                full_path = f"{artifact_dir}/{safe_path}"
-                fs_manager.write_file(full_path, content)
-                saved_files.append(full_path)
-
-        # Save executor raw artifact
-        fs_manager.write_file(f"{artifact_dir}/3_executor_raw.json", json.dumps(all_generated, indent=2))
-
-        summary_text = f"✅ **Parallel Execution Complete!**\n\nGenerated {len(saved_files)} file(s) across all task forces:\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
-        files_list = fs_manager.list_files()
-        await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-
-        # === Station 4.5: QA REVIEWER ===
-        await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "active"})
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Reviewing codebase for architectural alignment...", "stage": "qaReviewer"})
-        
-        qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
-        qa_sys_prompt = """You are the Lead QA Engineer. 
-Review the architectural plan and the generated codebase below. 
-Compare the codebase against the plan and PRD to ensure all requirements, UI elements, and logic were implemented correctly without hallucination.
-Write a concise Markdown review document. Point out anything missing or incorrect, and explicitly state what looks good. Focus on major architectural misses or UI discrepancies."""
-        
-        codebase_context = ""
-        for sf in saved_files:
-            try:
-                content = fs_manager.read_file(sf)
-                codebase_context += f"\n--- {sf} ---\n{content}\n"
-            except: pass
+            summary_text = f"✅ **Execution Complete (Chunk {chunk_num})!**\n\nGenerated {len(saved_files)} file(s):\n" + "\n".join([f"- `{sf}`" for sf in saved_files])
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": summary_text, "stage": "executor"})
             
-        qa_user_prompt = f"PLAN:\n{plan}\n\nGENERATED CODEBASE:\n{codebase_context}"
+            # === Station 4.5: QA REVIEWER ===
+            await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "active"})
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Reviewing Chunk {chunk_num} codebase...", "stage": "qaReviewer"})
+            
+            qa_model = models.get("qaReviewer", "google/gemini-2.5-flash")
+            qa_sys_prompt = "You are the Lead QA Engineer. Review the generated codebase against the plan. Output a concise Markdown review document. Focus on architectural misses or bugs."
+            codebase_context = ""
+            for sf in saved_files:
+                try:
+                    content = fs_manager.read_file(sf)
+                    codebase_context += f"\n--- {sf} ---\n{content}\n"
+                except: pass
+                
+            qa_user_prompt = f"PLAN:\n{plan}\n\nGENERATED CODEBASE:\n{codebase_context}"
+            qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
+            
+            fs_manager.write_file(f"{artifact_dir}/5_qa_review_chunk_{chunk_num}.md", qa_output)
+            update_run_costs(f"5_qaReviewer_chunk_{chunk_num}", qa_model, qa_usage)
+            await safe_send(websocket,{
+                "event": "chat", "sender": "swarm", "text": qa_output, "stage": "qaReviewer",
+                "usage": {"prompt_tokens": qa_usage.prompt_tokens, "completion_tokens": qa_usage.completion_tokens, "model": qa_model}
+            })
+            await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "complete"})
+            
+            # --- THE LEDGER UPDATE (Post-QA) ---
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "📝 Updating Global Architecture Ledger before next chunk...", "stage": "qaReviewer"})
+            ledger_summarizer_sys = """You are the Architecture Ledger Compiler.
+Extract the strict API contracts, database schemas, and global state shapes from the provided code. 
+Do not summarize the internal logic; ONLY outline the interfaces, exported functions, and data schemas so another agent can hook into them. Keep it extremely brief and high-signal."""
+            
+            ledger_summarizer_user = f"CODEBASE TO SUMMARIZE:\n{codebase_context}"
+            # Use Haiku or Flash for fast summarization
+            summarizer_model = models.get("qaReviewer", "google/gemini-2.5-flash")
+            ledger_update, ledger_usage = await llm.generate(ledger_summarizer_sys, ledger_summarizer_user, model_name=summarizer_model)
+            
+            with open(os.path.join(fs_manager.workspace_path, ledger_path), "a", encoding="utf-8") as ledger_file:
+                ledger_file.write(f"\n## Chunk {chunk_num} Updates\n{ledger_update}\n")
+            
+            update_run_costs(f"5b_ledger_update_chunk_{chunk_num}", summarizer_model, ledger_usage)
+
+        except Exception as e:
+            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Executor Error Chunk {chunk_num}: {str(e)}", "stage": "executor"})
         
-        qa_output, qa_usage = await llm.generate(qa_sys_prompt, qa_user_prompt, model_name=qa_model)
+        await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "complete"})
         
-        fs_manager.write_file(f"{artifact_dir}/4_qa_review.md", qa_output)
-        update_run_costs("4_qaReviewer", qa_model, qa_usage)
-        files_list = fs_manager.list_files()
-        await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
-        await safe_send(websocket,{
-            "event": "chat", "sender": "swarm", "text": qa_output, "stage": "qaReviewer",
-            "usage": {"prompt_tokens": qa_usage.prompt_tokens, "completion_tokens": qa_usage.completion_tokens, "model": qa_model}
-        })
-        await safe_send(websocket,{"event": "station_update", "station": "qaReviewer", "status": "complete"})
-        
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Determining execution commands...", "stage": "executor"})
-        runner_sys_prompt = """You are the DevOps Runner.
-Read the architectural plan and generated files. Output the exact bash commands to install dependencies (e.g. pip3 install) and run the main application.
+        # End of current chunk loop iteration
+        # Brief pause between chunks for UX
+        await asyncio.sleep(1)
+
+    # LOOP FINISHED.
+    # Run DevOps Runner on the overall project state.
+    await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": "Determining execution commands for full project...", "stage": "executor"})
+    runner_sys_prompt = """You are the DevOps Runner.
+Read the generated files and output the exact bash commands to install dependencies and run the main application.
 Output EXACTLY a valid JSON object. DO NOT wrap the JSON in markdown code blocks.
 Schema:
 {
   "commands": [
-    "pip3 install pygame",
-    "python3 snake_game.py"
+    "pip3 install -r requirements.txt",
+    "python3 app.py"
   ]
 }"""
-        runner_user_prompt = f"PLAN:\n{plan}\n\nGENERATED FILES:\n{saved_files}"
-        
-        runner_output, _ = await llm.generate(runner_sys_prompt, runner_user_prompt, model_name=models.get("executor", "anthropic/claude-3-haiku"), is_json=True)
-        
-        # Parse JSON
-        clean_runner_output = runner_output.strip()
-        if clean_runner_output.startswith("```json"): clean_runner_output = clean_runner_output[7:]
-        elif clean_runner_output.startswith("```"): clean_runner_output = clean_runner_output[3:]
-        if clean_runner_output.endswith("```"): clean_runner_output = clean_runner_output[:-3]
-        
-        try:
-            runner_data = json.loads(clean_runner_output.strip())
-            commands = runner_data.get("commands", [])
-        except Exception:
-            commands = []
-            
-        if commands and active_pty_fds:
-            cmd_str = " && ".join(commands) + "\n"
-            for pty_fd in active_pty_fds:
-                try:
-                    os.write(pty_fd, cmd_str.encode('utf-8'))
-                except Exception:
-                    pass
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Running in Local Terminal:\n\n`{cmd_str.strip()}`", "stage": "executor"})
-        elif commands:
-            await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"No active Local Terminal. Please run:\n\n`{' && '.join(commands)}`", "stage": "executor"})
-            
-    except Exception as e:
-        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Executor Error: {str(e)}", "stage": "executor"})
 
-    await safe_send(websocket,{"event": "station_update", "station": "executor", "status": "complete"})
+    # We read all files from the workspace as context for runner
+    existing_files = flatten_files(fs_manager.list_files())
+    runner_user_prompt = f"FULL GENERATED FILES:\n{existing_files}"
+    
+    runner_output, _ = await llm.generate(runner_sys_prompt, runner_user_prompt, model_name=models.get("executor", "anthropic/claude-3-haiku"), is_json=True)
+    
+    clean_runner_output = runner_output.strip()
+    if clean_runner_output.startswith("```json"): clean_runner_output = clean_runner_output[7:]
+    elif clean_runner_output.startswith("```"): clean_runner_output = clean_runner_output[3:]
+    if clean_runner_output.endswith("```"): clean_runner_output = clean_runner_output[:-3]
+    
+    try:
+        runner_data = json.loads(clean_runner_output.strip())
+        commands = runner_data.get("commands", [])
+    except Exception:
+        commands = []
+        
+    if commands and active_pty_fds:
+        cmd_str = " && ".join(commands) + "\n"
+        for pty_fd in active_pty_fds:
+            try:
+                os.write(pty_fd, cmd_str.encode('utf-8'))
+            except Exception:
+                pass
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"Running in Local Terminal:\n\n`{cmd_str.strip()}`", "stage": "executor"})
+    elif commands:
+        await safe_send(websocket,{"event": "chat", "sender": "swarm", "text": f"No active Local Terminal. Please run:\n\n`{' && '.join(commands)}`", "stage": "executor"})
+        
+    files_list = fs_manager.list_files()
+    await safe_send(websocket,{"event": "file_list", "files": files_list, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     await safe_send(websocket,{"event": "workflow_complete"})
 
 @app.websocket("/ws")

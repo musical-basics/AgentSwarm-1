@@ -27,6 +27,7 @@ import {
   Save,
   Download,
   Network,
+  Eye,
 } from "lucide-react";
 
 type NodeStatus = "idle" | "active" | "complete";
@@ -34,6 +35,7 @@ type NodeStatus = "idle" | "active" | "complete";
 interface NodeState {
   origin: NodeStatus;
   specFactory: NodeStatus;
+  overseer: NodeStatus;
   planner: NodeStatus;
   commander: NodeStatus;
   executor: NodeStatus;
@@ -42,7 +44,8 @@ interface NodeState {
 
 interface ConnectionState {
   originToSpec: boolean;
-  specToPlanner: boolean;
+  specToOverseer: boolean;
+  overseerToPlanner: boolean;
   plannerToCommander: boolean;
   commanderToExecutor: boolean;
   executorToQa: boolean;
@@ -132,6 +135,7 @@ export function FlowmindIDE() {
   const [nodeState, setNodeState] = useState<NodeState>({
     origin: "idle",
     specFactory: "idle",
+    overseer: "idle",
     planner: "idle",
     commander: "idle",
     executor: "idle",
@@ -168,7 +172,8 @@ export function FlowmindIDE() {
 
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     originToSpec: false,
-    specToPlanner: false,
+    specToOverseer: false,
+    overseerToPlanner: false,
     plannerToCommander: false,
     commanderToExecutor: false,
     executorToQa: false,
@@ -197,6 +202,7 @@ export function FlowmindIDE() {
   const [nodeModels, setNodeModels] = useState({
     origin: "google/gemini-2.5-flash",
     specFactory: "anthropic/claude-3-haiku",
+    overseer: "google/gemini-2.5-flash",
     planner: "google/gemini-2.5-flash",
     commander: "google/gemini-2.5-flash",
     executor: "anthropic/claude-3-haiku",
@@ -346,9 +352,11 @@ export function FlowmindIDE() {
           if (data.station === "origin" && data.status === "complete") {
              setConnectionState(prev => ({ ...prev, originToSpec: true }));
           } else if (data.station === "specFactory" && data.status === "complete") {
-             setConnectionState(prev => ({...prev, originToSpec: false, specToPlanner: true }));
+             setConnectionState(prev => ({...prev, originToSpec: false, specToOverseer: true }));
+          } else if (data.station === "overseer" && data.status === "complete") {
+             setConnectionState(prev => ({ ...prev, specToOverseer: false, overseerToPlanner: true }));
           } else if (data.station === "planner" && data.status === "complete") {
-             setConnectionState(prev => ({ ...prev, specToPlanner: false, plannerToCommander: true }));
+             setConnectionState(prev => ({ ...prev, overseerToPlanner: false, plannerToCommander: true }));
           } else if (data.station === "commander" && data.status === "complete") {
              setConnectionState(prev => ({ ...prev, plannerToCommander: false, commanderToExecutor: true }));
           } else if (data.station === "executor" && data.status === "complete") {
@@ -356,10 +364,14 @@ export function FlowmindIDE() {
           } else if (data.station === "qaReviewer" && data.status === "complete") {
              setConnectionState(prev => ({ ...prev, executorToQa: false }));
           }
+        } else if (data.event === "chunk_start") {
+          // Reset downstream nodes for next chunk iteration
+          setNodeState(prev => ({ ...prev, planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" }));
+          setConnectionState(prev => ({ ...prev, overseerToPlanner: true, plannerToCommander: false, commanderToExecutor: false, executorToQa: false }));
         } else if (data.event === "workflow_start") {
           setIsSimulating(true);
-          setNodeState({ origin: "idle", specFactory: "idle", planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" });
-          setConnectionState({ originToSpec: false, specToPlanner: false, plannerToCommander: false, commanderToExecutor: false, executorToQa: false });
+          setNodeState({ origin: "idle", specFactory: "idle", overseer: "idle", planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" });
+          setConnectionState({ originToSpec: false, specToOverseer: false, overseerToPlanner: false, plannerToCommander: false, commanderToExecutor: false, executorToQa: false });
         } else if (data.event === "workflow_complete") {
           setIsSimulating(false);
           setChatMessages(prev => [...prev, { role: "agent" as any, content: "Swarm workflow complete! Ready for next task." }]);
@@ -926,8 +938,8 @@ export function FlowmindIDE() {
                 </motion.button>
               </div>
 
-              {/* Top Row: Origin and Spec */}
-              <div className="flex items-center gap-4 mb-6 mt-28">
+              {/* Top Row: Origin → Spec Factory */}
+              <div className="flex items-center gap-4 mb-4 mt-28">
                 <div className="relative">
                   <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
                   <WorkflowNode
@@ -949,9 +961,27 @@ export function FlowmindIDE() {
                 </div>
               </div>
 
-              {/* Vertical connection */}
-              <div className="flex justify-center mb-4 mt-4">
-                <VerticalConnectionLine active={connectionState.specToPlanner} />
+              {/* Vertical connection: Spec → Overseer */}
+              <div className="flex justify-center mb-3 mt-0">
+                <VerticalConnectionLine active={connectionState.specToOverseer} />
+              </div>
+
+              {/* Overseer Row */}
+              <div className="flex items-center justify-center mb-3">
+                <div className="relative">
+                  <NodeModelSelector value={nodeModels.overseer} onChange={v => setNodeModels(p => ({...p, overseer: v}))} options={modelOptions} />
+                  <WorkflowNode
+                    title="OVERSEER"
+                    status={nodeState.overseer}
+                    color="indigo"
+                    icon={<Eye className="w-5 h-5 text-indigo-400" />}
+                  />
+                </div>
+              </div>
+
+              {/* Vertical connection: Overseer → Planner */}
+              <div className="flex justify-center mb-4 mt-0">
+                <VerticalConnectionLine active={connectionState.overseerToPlanner} />
               </div>
 
               {/* Middle Row: Planner → Commander */}
