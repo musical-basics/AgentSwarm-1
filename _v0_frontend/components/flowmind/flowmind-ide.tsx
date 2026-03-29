@@ -1331,12 +1331,32 @@ export function FlowmindIDE() {
                             </div>
                           </div>
                         </div>
-                        <div className="pl-5">
+                        <div className="pl-5 flex flex-wrap items-center justify-between gap-4 mt-1">
                           <NodeModelSelector 
                             value={nodeModels[key as keyof typeof nodeModels]} 
                             onChange={(v) => setNodeModels(p => ({...p, [key]: v}))}
                             options={modelOptions} 
                           />
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setNodeModels(p => ({...p, [key]: "google/gemini-2.5-flash"}))}
+                              className="px-2 py-1 bg-[#22d3ee]/10 hover:bg-[#22d3ee]/20 text-[#22d3ee] border border-[#22d3ee]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              ⚡️ Fast (Flash)
+                            </button>
+                            <button
+                              onClick={() => setNodeModels(p => ({...p, [key]: "anthropic/claude-3-haiku"}))}
+                              className="px-2 py-1 bg-[#a855f7]/10 hover:bg-[#a855f7]/20 text-[#a855f7] border border-[#a855f7]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              🍃 Smart (Haiku)
+                            </button>
+                            <button
+                              onClick={() => setNodeModels(p => ({...p, [key]: "anthropic/claude-3.5-sonnet"}))}
+                              className="px-2 py-1 bg-[#fbbf24]/10 hover:bg-[#fbbf24]/20 text-[#fbbf24] border border-[#fbbf24]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
+                            >
+                              🧠 Hard (Sonnet)
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
