@@ -248,6 +248,9 @@ export function FlowmindIDE() {
   const [isDragging, setIsDragging] = useState<"sidebar" | "swarm" | "chat" | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, value: 0 });
 
+  // Node Context Menu state
+  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeKey: keyof typeof nodeModels } | null>(null);
+
   useEffect(() => {
     let ws: WebSocket;
     const connect = () => {
@@ -490,12 +493,26 @@ export function FlowmindIDE() {
       document.body.style.cursor = isDragging === "chat" ? "ns-resize" : "ew-resize";
       document.body.style.userSelect = "none";
     }
-
+    document.addEventListener("mouseup", handleMouseUp);
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isDragging]);
+
+  // Click outside listener for context menus
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setContextMenu(null);
+      setNodeContextMenu(null);
+    };
+    document.addEventListener("click", handleClickOutside);
+    document.addEventListener("contextmenu", handleClickOutside);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+      document.removeEventListener("contextmenu", handleClickOutside);
+    };
+  }, []);
 
   const prevDraggingRef = useRef<"sidebar" | "swarm" | "chat" | null>(null);
   
@@ -1055,28 +1072,72 @@ export function FlowmindIDE() {
                 </div>
               </div>
 
+              {/* === NODE CONTEXT MENU === */}
+              {nodeContextMenu && (
+                <div 
+                  className="fixed z-50 bg-[#12121a] border border-[#22d3ee]/30 rounded-lg shadow-2xl py-1 w-48"
+                  style={{ top: nodeContextMenu.y, left: nodeContextMenu.x, boxShadow: "0 10px 40px rgba(0,0,0,0.8), 0 0 15px rgba(34,211,238,0.2)" }}
+                  onClick={e => e.stopPropagation()}
+                  onContextMenu={e => e.preventDefault()}
+                >
+                  <div className="px-3 py-1.5 border-b border-[#22d3ee]/10 mb-1">
+                    <span className="text-[10px] text-[#22d3ee]/70 uppercase tracking-widest font-bold">Select Model Tier</span>
+                  </div>
+                  
+                  <button 
+                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#22d3ee]/20 hover:text-white transition-colors"
+                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "google/gemini-2.5-flash"})); setNodeContextMenu(null); }}
+                  >
+                    ⚡️ Flash <span className="text-[9px] text-gray-500 ml-1">(Ultra Fast)</span>
+                  </button>
+                  <button 
+                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#a855f7]/20 hover:text-white transition-colors"
+                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "anthropic/claude-3-haiku"})); setNodeContextMenu(null); }}
+                  >
+                    🍃 Haiku <span className="text-[9px] text-gray-500 ml-1">(Fast & Smart)</span>
+                  </button>
+                  <button 
+                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#fbbf24]/20 hover:text-white transition-colors"
+                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "anthropic/claude-3.5-sonnet"})); setNodeContextMenu(null); }}
+                  >
+                    🧠 Sonnet <span className="text-[9px] text-gray-500 ml-1">(Complex Tasks)</span>
+                  </button>
+                  
+                  <div className="px-3 py-1.5 border-t border-[#22d3ee]/10 mt-1">
+                    <span className="text-[9px] text-gray-500 mb-1 block">Custom Selection:</span>
+                    <NodeModelSelector 
+                      value={nodeModels[nodeContextMenu.nodeKey]} 
+                      onChange={v => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: v})); }} 
+                      options={modelOptions} 
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* === ENTERPRISE PROFILE === */}
               {activeProfile === "enterprise" && (
                 <div className="flex flex-col items-center w-full">
                   {/* Top Row: Origin → Spec Factory */}
                   <div className="flex items-center gap-4 mb-4 mt-28">
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="THE ORIGIN"
                     status={nodeState.origin}
                     color="cyan"
                     icon={<SparkIcon status={nodeState.origin} />}
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
+                    activeModelId={nodeModels.origin}
                   />
                 </div>
                 <ConnectionLine active={connectionState.originToSpec} />
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.specFactory} onChange={v => setNodeModels(p => ({...p, specFactory: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="SPEC FACTORY"
                     status={nodeState.specFactory}
                     color="purple"
                     icon={<ArmoredSparkIcon status={nodeState.specFactory} />}
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "specFactory" }); }}
+                    activeModelId={nodeModels.specFactory}
                   />
                 </div>
               </div>
@@ -1089,12 +1150,13 @@ export function FlowmindIDE() {
               {/* Overseer Row */}
               <div className="flex items-center justify-center mb-3">
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.overseer} onChange={v => setNodeModels(p => ({...p, overseer: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="OVERSEER"
                     status={nodeState.overseer}
                     color="indigo"
                     icon={<Eye className="w-5 h-5 text-indigo-400" />}
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "overseer" }); }}
+                    activeModelId={nodeModels.overseer}
                   />
                 </div>
               </div>
@@ -1107,22 +1169,24 @@ export function FlowmindIDE() {
               {/* Middle Row: Planner → Commander */}
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.planner} onChange={v => setNodeModels(p => ({...p, planner: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="PLANNER"
                     status={nodeState.planner}
                     color="emerald"
                     icon={<TeamIcon status={nodeState.planner} />}
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "planner" }); }}
+                    activeModelId={nodeModels.planner}
                   />
                 </div>
                 <ConnectionLine active={connectionState.plannerToCommander} />
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.commander} onChange={v => setNodeModels(p => ({...p, commander: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="COMMANDER"
                     status={nodeState.commander}
                     color="indigo"
                     icon={<CommanderIcon status={nodeState.commander} />}
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "commander" }); }}
+                    activeModelId={nodeModels.commander}
                   />
                 </div>
               </div>
@@ -1140,44 +1204,48 @@ export function FlowmindIDE() {
                   <div className="flex items-center gap-2">
                     <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#a855f7]/70 uppercase tracking-wider">Wizard</span>
-                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
                       <WorkflowNode
                         title="WIZARD"
                         status={nodeState.executor}
                         color="amber"
                         icon={<CodeIcon status={nodeState.executor} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorWizard" }); }}
+                        activeModelId={nodeModels.executorWizard}
                       />
                     </div>
                     <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#22d3ee]/70 uppercase tracking-wider">Specialist</span>
-                      <NodeModelSelector value={nodeModels.executorSpecialist} onChange={v => setNodeModels(p => ({...p, executorSpecialist: v}))} options={modelOptions} />
                       <WorkflowNode
                         title="SPECIALIST"
                         status={nodeState.executor}
                         color="cyan"
                         icon={<TeamIcon status={nodeState.executor} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSpecialist" }); }}
+                        activeModelId={nodeModels.executorSpecialist}
                       />
                     </div>
                     <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#34d399]/70 uppercase tracking-wider">Swarm</span>
-                      <NodeModelSelector value={nodeModels.executorSwarm} onChange={v => setNodeModels(p => ({...p, executorSwarm: v}))} options={modelOptions} />
                       <WorkflowNode
                         title="SWARM"
                         status={nodeState.executor}
                         color="emerald"
                         icon={<SwarmIcon status={nodeState.executor} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSwarm" }); }}
+                        activeModelId={nodeModels.executorSwarm}
                       />
                     </div>
                   </div>
                 </div>
                 <ConnectionLine active={connectionState.executorToQa} />
                 <div className="relative">
-                  <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
                   <WorkflowNode
                     title="QA REVIEWER"
                     status={nodeState.qaReviewer}
                     color="rose"
                     icon={<Shield className="w-5 h-5 text-rose-400" />} 
+                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
+                    activeModelId={nodeModels.qaReviewer}
                   />
                 </div>
               </div>
@@ -1189,22 +1257,40 @@ export function FlowmindIDE() {
                 <div className="flex flex-col items-center justify-center w-full min-h-[400px]">
                   <div className="flex flex-wrap justify-center items-center gap-4 mt-20">
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
-                      <WorkflowNode title="THE ORIGIN" status={nodeState.origin} color="cyan" icon={<SparkIcon status={nodeState.origin} />} />
+                      <WorkflowNode
+                        title="THE ORIGIN"
+                        status={nodeState.origin}
+                        color="cyan"
+                        icon={<SparkIcon status={nodeState.origin} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
+                        activeModelId={nodeModels.origin}
+                      />
                     </div>
                     
-                    <ConnectionLine active={nodeState.origin === "complete"} />
+                    <ConnectionLine active={connectionState.originToSpec} />
                     
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
-                      <WorkflowNode title="ONE-SHOT WIZARD" status={nodeState.executor} color="amber" icon={<CodeIcon status={nodeState.executor} />} />
+                      <WorkflowNode
+                        title="ONE-SHOT WIZARD"
+                        status={nodeState.executor}
+                        color="amber"
+                        icon={<CodeIcon status={nodeState.executor} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorWizard" }); }}
+                        activeModelId={nodeModels.executorWizard}
+                      />
                     </div>
 
-                    <ConnectionLine active={nodeState.executor === "complete"} />
+                    <ConnectionLine active={connectionState.executorToQa} />
                     
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
-                      <WorkflowNode title="QA REVIEWER" status={nodeState.qaReviewer} color="rose" icon={<Shield className="w-5 h-5 text-rose-400" />} />
+                      <WorkflowNode
+                        title="QA REVIEWER"
+                        status={nodeState.qaReviewer}
+                        color="rose"
+                        icon={<Shield className="w-5 h-5 text-rose-400" />} 
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
+                        activeModelId={nodeModels.qaReviewer}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1215,29 +1301,53 @@ export function FlowmindIDE() {
                 <div className="flex flex-col items-center justify-center w-full min-h-[400px]">
                   <div className="flex flex-wrap justify-center items-center gap-4 mt-20">
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
-                      <WorkflowNode title="THE ORIGIN" status={nodeState.origin} color="cyan" icon={<SparkIcon status={nodeState.origin} />} />
+                      <WorkflowNode
+                        title="THE ORIGIN"
+                        status={nodeState.origin}
+                        color="cyan"
+                        icon={<SparkIcon status={nodeState.origin} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
+                        activeModelId={nodeModels.origin}
+                      />
                     </div>
                     
-                    <ConnectionLine active={nodeState.origin === "complete"} />
+                    <ConnectionLine active={connectionState.originToSpec} />
                     
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.specFactory} onChange={v => setNodeModels(p => ({...p, specFactory: v}))} options={modelOptions} />
-                      <WorkflowNode title="EDITOR-IN-CHIEF" status={nodeState.specFactory} color="purple" icon={<ArmoredSparkIcon status={nodeState.specFactory} />} />
+                      <WorkflowNode
+                        title="EDITOR-IN-CHIEF"
+                        status={nodeState.planner}
+                        color="purple"
+                        icon={<ArmoredSparkIcon status={nodeState.planner} />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "planner" }); }}
+                        activeModelId={nodeModels.planner}
+                      />
                     </div>
 
-                    <ConnectionLine active={nodeState.specFactory === "complete"} />
+                    <ConnectionLine active={connectionState.plannerToCommander} />
                     
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
-                      <WorkflowNode title="PROSE WRITER" status={nodeState.executor} color="emerald" icon={<FileText className="w-5 h-5 text-emerald-400" />} />
+                      <WorkflowNode
+                        title="PROSE WRITER"
+                        status={nodeState.executor}
+                        color="emerald"
+                        icon={<FileCode className="w-5 h-5 text-emerald-400" />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSpecialist" }); }}
+                        activeModelId={nodeModels.executorSpecialist}
+                      />
                     </div>
 
-                    <ConnectionLine active={nodeState.executor === "complete"} />
+                    <ConnectionLine active={connectionState.executorToQa} />
 
                     <div className="relative">
-                      <NodeModelSelector value={nodeModels.qaReviewer} onChange={v => setNodeModels(p => ({...p, qaReviewer: v}))} options={modelOptions} />
-                      <WorkflowNode title="COPY EDITOR" status={nodeState.qaReviewer} color="rose" icon={<Eye className="w-5 h-5 text-rose-400" />} />
+                      <WorkflowNode
+                        title="COPY EDITOR"
+                        status={nodeState.qaReviewer}
+                        color="rose"
+                        icon={<Eye className="w-5 h-5 text-rose-400" />}
+                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
+                        activeModelId={nodeModels.qaReviewer}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1634,13 +1744,12 @@ function NodeModelSelector({
   const filteredOptions = currentCompany ? options.filter(o => o.id.split('/')[0] === currentCompany) : options;
 
   return (
-    <div className="absolute -top-[54px] left-1/2 -translate-x-1/2 w-full min-w-[140px] max-w-[220px] px-2 z-20 flex flex-col gap-1.5">
+    <div className="w-full flex justify-center">
       {/* Provider Dropdown */}
       <select 
         value={currentCompany} 
         onChange={handleCompanyChange}
-        className="w-full text-[10px] bg-[#12121a] text-[#22d3ee] border border-[#22d3ee]/20 rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-[#22d3ee]/60 transition-colors uppercase font-semibold"
-        style={{ boxShadow: "0 0 10px rgba(0,0,0,0.5)" }}
+        className="text-[9px] bg-transparent text-[#22d3ee] border-none outline-none cursor-pointer uppercase font-bold"
       >
         <option value="">PROVIDER...</option>
         {companies.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1650,9 +1759,8 @@ function NodeModelSelector({
       <select 
         value={value} 
         onChange={e => onChange(e.target.value)}
-        className="w-full text-[11px] bg-[#12121a] text-[#cccccc] border border-[#22d3ee]/30 rounded px-1.5 py-1 outline-none cursor-pointer hover:border-[#22d3ee]/60 transition-colors"
+        className="w-[12px] bg-transparent text-transparent border-none outline-none cursor-pointer truncate"
         disabled={!currentCompany}
-        style={{ boxShadow: "0 0 10px rgba(0,0,0,0.5)" }}
       >
         <option value="">MODEL...</option>
         {filteredOptions.map(o => {
@@ -1669,17 +1777,28 @@ function NodeModelSelector({
   );
 }
 
+// Helper to format short model string (e.g. "google/gemini-2.5-flash" -> "Gemini 2.5")
+function formatModelName(modelId?: string) {
+  if (!modelId) return "Unknown";
+  const name = modelId.split("/").pop() || "";
+  return name.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()).replace(/Gemini \d.\d Flash Preview/, "Gemini Flash").replace("Claude 3.5 Sonnet", "Sonnet 3.5").replace("Claude 3 Haiku", "Haiku").substring(0, 15);
+}
+
 // Full Workflow Node with Glowing Effects
 function WorkflowNode({
   title,
   status,
   color,
   icon,
+  onContextMenu,
+  activeModelId,
 }: {
   title: string;
   status: NodeStatus;
   color: "cyan" | "purple" | "emerald" | "amber" | "rose" | "indigo";
   icon: React.ReactNode;
+  onContextMenu?: (e: React.MouseEvent) => void;
+  activeModelId?: string;
 }) {
   const colorMap = {
     cyan: {
@@ -1724,7 +1843,7 @@ function WorkflowNode({
 
   return (
     <motion.div
-      className="relative w-[110px] h-[130px] rounded-xl transition-all duration-300"
+      className="relative w-[110px] h-[130px] rounded-xl transition-all duration-300 cursor-context-menu"
       style={{
         border: `2px solid ${status === "idle" ? "#2d2d2d" : colors.border}`,
         background: status === "idle" ? "rgba(20,20,25,0.8)" : colors.bg,
@@ -1734,6 +1853,7 @@ function WorkflowNode({
         scale: status === "active" ? 1.1 : 1,
       }}
       transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      onContextMenu={onContextMenu}
     >
       {/* Pulsing glow overlay when active */}
       <AnimatePresence>
@@ -1798,10 +1918,19 @@ function WorkflowNode({
       {["top-0 left-0 border-t-2 border-l-2 rounded-tl-lg", "top-0 right-0 border-t-2 border-r-2 rounded-tr-lg", "bottom-0 left-0 border-b-2 border-l-2 rounded-bl-lg", "bottom-0 right-0 border-b-2 border-r-2 rounded-br-lg"].map((pos, i) => (
         <div
           key={i}
-          className={`absolute w-4 h-4 ${pos} opacity-60`}
+          className={`absolute w-4 h-4 ${pos} opacity-60 pointer-events-none`}
           style={{ borderColor: status !== "idle" ? colors.border : "#404040" }}
         />
       ))}
+      
+      {/* Active Model Indicator Tag (Top Center) */}
+      {activeModelId && (
+        <div className="absolute -top-[10px] left-1/2 -translate-x-1/2 bg-[#12121a] px-2 py-0.5 rounded-full border border-[#404040] shadow-md z-20 pointer-events-none whitespace-nowrap">
+          <span className="text-[7.5px] uppercase tracking-wider" style={{ color: colors.border }}>
+            {formatModelName(activeModelId)}
+          </span>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -184,3 +184,25 @@ RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/N
 2026-03-28 22:23:51,585 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
 2026-03-28 22:23:51,585 - INFO - [Dispatcher] Profile=sniper, Complexity=2, MaxTokens=3072
 2026-03-28 22:23:52,088 - ERROR - CRITICAL SWARM ERROR: 'FileSystemManager' object has no attribute 'format_all_files'
+2026-03-28 22:25:32,344 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:25:33,471 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:25:33,513 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:25:38,484 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:25:39,721 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:25:39,779 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:25:39,779 - INFO - [Dispatcher] Profile=sniper, Complexity=1, MaxTokens=1024
+2026-03-28 22:25:40,282 - ERROR - CRITICAL SWARM ERROR: 'FileSystemManager' object has no attribute 'format_all_files'
+2026-03-28 22:26:00,178 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 22:26:05,583 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:26:06,753 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:26:06,799 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:26:08,221 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 22:26:09,208 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:26:09,241 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 22:26:09,241 - INFO - [Dispatcher] Profile=sniper, Complexity=1, MaxTokens=1024
+2026-03-28 22:26:09,748 - INFO - [LLM Generate] Starting request to model: anthropic/claude-sonnet-4.6, is_json: False
+2026-03-28 22:26:10,849 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:26:12,793 - INFO - [LLM Generate] Success for model: anthropic/claude-sonnet-4.6
+2026-03-28 22:26:12,795 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 22:26:14,227 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 22:26:15,661 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
