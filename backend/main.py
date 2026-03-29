@@ -897,6 +897,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     config_data = data.get("config", {})
                     save_workspace_config(fs_manager.workspace_path, config_data)
+                    
+                    if "chatAgentCompany" in data:
+                        state["chatAgentCompany"] = data["chatAgentCompany"]
+                    if "chatAgentModel" in data:
+                        state["chatAgentModel"] = data["chatAgentModel"]
+                    save_ide_state(state)
+                    
                     files = fs_manager.list_files()
                     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 except Exception as e:

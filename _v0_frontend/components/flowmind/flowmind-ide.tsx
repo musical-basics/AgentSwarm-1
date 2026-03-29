@@ -877,8 +877,13 @@ export function FlowmindIDE() {
                 <motion.button
                   onClick={() => {
                     if (socket) {
-                      socket.send(JSON.stringify({ command: "save_config", config: nodeModels }));
-                      setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration to swarm_config.json" }]);
+                      socket.send(JSON.stringify({ 
+                        command: "save_config", 
+                        config: nodeModels,
+                        chatAgentCompany,
+                        chatAgentModel
+                      }));
+                      setChatMessages(prev => [...prev, { role: "agent", content: "Saved configuration and chat defaults." }]);
                     } else {
                       alert("Not connected to backend");
                     }
