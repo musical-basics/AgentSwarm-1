@@ -419,6 +419,23 @@ COMPLEXITY_BUDGETS = {
     3: 8192,   # Complex: full app, multi-file architecture
 }
 
+
+
+def normalize_models_dict(models_dict, complexity):
+    if not models_dict: return {}
+    res = {}
+    for k, v in models_dict.items():
+        if isinstance(v, dict):
+            if complexity == 1:
+                res[k] = v.get("easy", v.get("hard", "google/gemini-2.5-flash"))
+            elif complexity == 2:
+                res[k] = v.get("medium", v.get("hard", "google/gemini-2.5-flash"))
+            else:
+                res[k] = v.get("hard", "google/gemini-2.5-flash")
+        else:
+            res[k] = v
+    return res
+
 async def classify_intent(prompt: str, model_id: str) -> tuple[str, int]:
     """Returns (profile, complexity) where complexity is 1/2/3."""
     system_prompt = """
@@ -470,7 +487,7 @@ async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: di
         await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "active"})
         
         # Dispatch: classify and get token budget
-        origin_model = models_dict.get("origin", "google/gemini-2.5-flash") if models_dict else "google/gemini-2.5-flash"
+        origin_model = normalize_models_dict(models_dict, 3).get("origin", "google/gemini-2.5-flash") if models_dict else "google/gemini-2.5-flash"
         profile, complexity = await classify_intent(message, origin_model)
         max_tokens = COMPLEXITY_BUDGETS[complexity]
         
@@ -484,11 +501,11 @@ async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: di
         })
         
         if profile == "sniper":
-            await run_sniper_loop(websocket, message, models_dict, max_tokens)
+            await run_sniper_loop(websocket, message, normalize_models_dict(models_dict, complexity), max_tokens)
         elif profile == "newsroom":
-            await run_newsroom_loop(websocket, message, models_dict, max_tokens)
+            await run_newsroom_loop(websocket, message, normalize_models_dict(models_dict, complexity), max_tokens)
         else:
-            await run_enterprise_loop(websocket, message, models_dict, max_tokens)
+            await run_enterprise_loop(websocket, message, normalize_models_dict(models_dict, complexity), max_tokens)
             
     except asyncio.CancelledError:
         logging.info("Swarm execution cancelled by user")
@@ -1230,7 +1247,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Classification-only: show which profile/nodes will be used, don't execute
                 msg = data.get("message", "")
                 models_dict = data.get("models", {})
-                origin_model = models_dict.get("origin", "google/gemini-2.5-flash")
+                origin_model = normalize_models_dict(models_dict, 3).get("origin", "google/gemini-2.5-flash")
                 try:
                     await safe_send(websocket, {"event": "station_update", "station": "origin", "status": "active"})
                     profile, complexity = await classify_intent(msg, origin_model)

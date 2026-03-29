@@ -27,7 +27,11 @@
       "_v0_frontend/components/ui/**",
       "**/.next/**",
       "**/out/**",
-      "workspace_sandbox/**"
+      "workspace_sandbox/**",
+      "**/swarm.log",
+      "**/.ide_state.json",
+      "**/.env.local",
+      "agent-swarm-repomix.xml"
     ]
   }
 }

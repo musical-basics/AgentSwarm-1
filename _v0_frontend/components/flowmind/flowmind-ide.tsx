@@ -206,16 +206,16 @@ export function FlowmindIDE() {
 
   const [modelOptions, setModelOptions] = useState<any[]>([]);
   const [nodeModels, setNodeModels] = useState({
-    origin: "google/gemini-2.5-flash",
-    specFactory: "anthropic/claude-3-haiku",
-    overseer: "google/gemini-2.5-flash",
-    planner: "google/gemini-2.5-flash",
-    commander: "google/gemini-2.5-flash",
-    executor: "anthropic/claude-3-haiku",
-    executorWizard: "anthropic/claude-3.5-sonnet",
-    executorSpecialist: "google/gemini-2.5-flash",
-    executorSwarm: "anthropic/claude-3-haiku",
-    qaReviewer: "google/gemini-2.5-flash",
+    origin: { easy: "google/gemini-2.5-flash", medium: "google/gemini-2.5-flash", hard: "google/gemini-2.5-pro" },
+    specFactory: { easy: "anthropic/claude-3-haiku", medium: "anthropic/claude-3.5-sonnet", hard: "anthropic/claude-3.5-sonnet" },
+    overseer: { easy: "google/gemini-2.5-flash", medium: "google/gemini-2.5-flash", hard: "google/gemini-2.5-pro" },
+    planner: { easy: "anthropic/claude-3-haiku", medium: "anthropic/claude-3.5-sonnet", hard: "anthropic/claude-3.5-sonnet" },
+    commander: { easy: "google/gemini-2.5-flash", medium: "google/gemini-2.5-flash", hard: "google/gemini-2.5-pro" },
+    executor: { easy: "anthropic/claude-3-haiku", medium: "anthropic/claude-3.5-sonnet", hard: "anthropic/claude-3.5-sonnet" },
+    executorWizard: { easy: "anthropic/claude-3-haiku", medium: "anthropic/claude-3.5-sonnet", hard: "anthropic/claude-3.5-sonnet" },
+    executorSpecialist: { easy: "google/gemini-2.5-flash", medium: "google/gemini-2.5-flash", hard: "google/gemini-2.5-pro" },
+    executorSwarm: { easy: "anthropic/claude-3-haiku", medium: "anthropic/claude-3-haiku", hard: "anthropic/claude-3.5-sonnet" },
+    qaReviewer: { easy: "google/gemini-2.5-flash", medium: "google/gemini-2.5-flash", hard: "google/gemini-2.5-pro" },
   });
 
   const handleExportModels = () => {
@@ -1088,7 +1088,7 @@ export function FlowmindIDE() {
                     status={nodeState.origin}
                     color="cyan"
                     icon={<SparkIcon status={nodeState.origin} />}
-                    activeModelId={nodeModels.origin}
+                    activeModelId={nodeModels.origin.hard}
                   />
                 </div>
                 <ConnectionLine active={connectionState.originToSpec} />
@@ -1098,7 +1098,7 @@ export function FlowmindIDE() {
                     status={nodeState.specFactory}
                     color="purple"
                     icon={<ArmoredSparkIcon status={nodeState.specFactory} />}
-                    activeModelId={nodeModels.specFactory}
+                    activeModelId={nodeModels.specFactory.hard}
                   />
                 </div>
               </div>
@@ -1116,7 +1116,7 @@ export function FlowmindIDE() {
                     status={nodeState.overseer}
                     color="indigo"
                     icon={<Eye className="w-5 h-5 text-indigo-400" />}
-                    activeModelId={nodeModels.overseer}
+                    activeModelId={nodeModels.overseer.hard}
                   />
                 </div>
               </div>
@@ -1134,7 +1134,7 @@ export function FlowmindIDE() {
                     status={nodeState.planner}
                     color="emerald"
                     icon={<TeamIcon status={nodeState.planner} />}
-                    activeModelId={nodeModels.planner}
+                    activeModelId={nodeModels.planner.hard}
                   />
                 </div>
                 <ConnectionLine active={connectionState.plannerToCommander} />
@@ -1144,7 +1144,7 @@ export function FlowmindIDE() {
                     status={nodeState.commander}
                     color="indigo"
                     icon={<CommanderIcon status={nodeState.commander} />}
-                    activeModelId={nodeModels.commander}
+                    activeModelId={nodeModels.commander.hard}
                   />
                 </div>
               </div>
@@ -1167,7 +1167,7 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="amber"
                         icon={<CodeIcon status={nodeState.executor} />}
-                        activeModelId={nodeModels.executorWizard}
+                        activeModelId={nodeModels.executorWizard.hard}
                       />
                     </div>
                     <div className="relative flex flex-col items-center gap-0.5">
@@ -1177,7 +1177,7 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="cyan"
                         icon={<TeamIcon status={nodeState.executor} />}
-                        activeModelId={nodeModels.executorSpecialist}
+                        activeModelId={nodeModels.executorSpecialist.hard}
                       />
                     </div>
                     <div className="relative flex flex-col items-center gap-0.5">
@@ -1187,7 +1187,7 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="emerald"
                         icon={<SwarmIcon status={nodeState.executor} />}
-                        activeModelId={nodeModels.executorSwarm}
+                        activeModelId={nodeModels.executorSwarm.hard}
                       />
                     </div>
                   </div>
@@ -1199,7 +1199,7 @@ export function FlowmindIDE() {
                     status={nodeState.qaReviewer}
                     color="rose"
                     icon={<Shield className="w-5 h-5 text-rose-400" />}
-                    activeModelId={nodeModels.qaReviewer}
+                    activeModelId={nodeModels.qaReviewer.hard}
                   />
                 </div>
               </div>
@@ -1216,7 +1216,7 @@ export function FlowmindIDE() {
                         status={nodeState.origin}
                         color="cyan"
                         icon={<SparkIcon status={nodeState.origin} />}
-                        activeModelId={nodeModels.origin}
+                        activeModelId={nodeModels.origin.hard}
                       />
                     </div>
                     
@@ -1228,7 +1228,7 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="amber"
                         icon={<CodeIcon status={nodeState.executor} />}
-                        activeModelId={nodeModels.executorWizard}
+                        activeModelId={nodeModels.executorWizard.hard}
                       />
                     </div>
 
@@ -1240,7 +1240,7 @@ export function FlowmindIDE() {
                         status={nodeState.qaReviewer}
                         color="rose"
                         icon={<Shield className="w-5 h-5 text-rose-400" />}
-                        activeModelId={nodeModels.qaReviewer}
+                        activeModelId={nodeModels.qaReviewer.hard}
                       />
                     </div>
                   </div>
@@ -1257,7 +1257,7 @@ export function FlowmindIDE() {
                         status={nodeState.origin}
                         color="cyan"
                         icon={<SparkIcon status={nodeState.origin} />}
-                        activeModelId={nodeModels.origin}
+                        activeModelId={nodeModels.origin.hard}
                       />
                     </div>
                     
@@ -1269,7 +1269,7 @@ export function FlowmindIDE() {
                         status={nodeState.planner}
                         color="purple"
                         icon={<ArmoredSparkIcon status={nodeState.planner} />}
-                        activeModelId={nodeModels.planner}
+                        activeModelId={nodeModels.planner.hard}
                       />
                     </div>
 
@@ -1281,7 +1281,7 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="emerald"
                         icon={<FileCode className="w-5 h-5 text-emerald-400" />}
-                        activeModelId={nodeModels.executorSpecialist}
+                        activeModelId={nodeModels.executorSpecialist.hard}
                       />
                     </div>
 
@@ -1293,7 +1293,7 @@ export function FlowmindIDE() {
                         status={nodeState.qaReviewer}
                         color="rose"
                         icon={<Eye className="w-5 h-5 text-rose-400" />}
-                        activeModelId={nodeModels.qaReviewer}
+                        activeModelId={nodeModels.qaReviewer.hard}
                       />
                     </div>
                   </div>
@@ -1331,31 +1331,38 @@ export function FlowmindIDE() {
                             </div>
                           </div>
                         </div>
-                        <div className="pl-5 flex flex-wrap items-center justify-between gap-4 mt-1">
-                          <NodeModelSelector 
-                            value={nodeModels[key as keyof typeof nodeModels]} 
-                            onChange={(v) => setNodeModels(p => ({...p, [key]: v}))}
-                            options={modelOptions} 
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setNodeModels(p => ({...p, [key]: "google/gemini-2.5-flash"}))}
-                              className="px-2 py-1 bg-[#22d3ee]/10 hover:bg-[#22d3ee]/20 text-[#22d3ee] border border-[#22d3ee]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
-                            >
-                              ⚡️ Fast (Flash)
-                            </button>
-                            <button
-                              onClick={() => setNodeModels(p => ({...p, [key]: "anthropic/claude-3-haiku"}))}
-                              className="px-2 py-1 bg-[#a855f7]/10 hover:bg-[#a855f7]/20 text-[#a855f7] border border-[#a855f7]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
-                            >
-                              🍃 Smart (Haiku)
-                            </button>
-                            <button
-                              onClick={() => setNodeModels(p => ({...p, [key]: "anthropic/claude-3.5-sonnet"}))}
-                              className="px-2 py-1 bg-[#fbbf24]/10 hover:bg-[#fbbf24]/20 text-[#fbbf24] border border-[#fbbf24]/30 rounded text-[9px] font-bold uppercase tracking-wider transition-colors"
-                            >
-                              🧠 Hard (Sonnet)
-                            </button>
+                        <div className="pl-5 flex flex-col gap-3 mt-3 border-t border-white/5 pt-3">
+                          <div className="flex items-center gap-4 border-l-2 border-[#22d3ee] pl-3">
+                            <span className="text-[10px] w-14 text-[#22d3ee] uppercase font-bold tracking-wider">⚡️ EASY:</span>
+                            <NodeModelSelector 
+                              value={(nodeModels[key as keyof typeof nodeModels] as any).easy || ""} 
+                              onChange={(v) => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), easy: v}}))}
+                              options={modelOptions} 
+                            />
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), easy: "google/gemini-2.5-flash"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Flash</button>
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), easy: "anthropic/claude-3-haiku"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Haiku</button>
+                          </div>
+                          
+                          <div className="flex items-center gap-4 border-l-2 border-[#a855f7] pl-3">
+                            <span className="text-[10px] w-14 text-[#a855f7] uppercase font-bold tracking-wider">🍃 MEDIUM:</span>
+                            <NodeModelSelector 
+                              value={(nodeModels[key as keyof typeof nodeModels] as any).medium || ""} 
+                              onChange={(v) => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), medium: v}}))}
+                              options={modelOptions} 
+                            />
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), medium: "anthropic/claude-3.5-sonnet"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Sonnet</button>
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), medium: "google/gemini-2.5-flash"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Flash</button>
+                          </div>
+                          
+                          <div className="flex items-center gap-4 border-l-2 border-[#fbbf24] pl-3">
+                            <span className="text-[10px] w-14 text-[#fbbf24] uppercase font-bold tracking-wider">🧠 HARD:</span>
+                            <NodeModelSelector 
+                              value={(nodeModels[key as keyof typeof nodeModels] as any).hard || ""} 
+                              onChange={(v) => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), hard: v}}))}
+                              options={modelOptions} 
+                            />
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), hard: "anthropic/claude-3.5-sonnet"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Sonnet</button>
+                            <button onClick={() => setNodeModels(p => ({...p, [key]: {...(p[key as keyof typeof nodeModels] as any), hard: "google/gemini-2.5-pro"}}))} className="text-[9px] px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-gray-400">Pro</button>
                           </div>
                         </div>
                       </div>
