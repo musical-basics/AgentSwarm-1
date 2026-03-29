@@ -40,7 +40,7 @@ class LLMEngine:
             api_key=api_key or "DUMMY_KEY",
         )
 
-    async def generate(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash", is_json: bool = False) -> tuple[str, any]:
+    async def generate(self, system_prompt: str, user_prompt: str, model_name: str = "google/gemini-2.5-flash", is_json: bool = False, max_tokens: int = 8192) -> tuple[str, any]:
         kwargs = {
             "extra_headers": {
                 "HTTP-Referer": "http://localhost:3008",
@@ -51,7 +51,7 @@ class LLMEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
         }
         if is_json:
             kwargs["response_format"] = {"type": "json_object"}
@@ -386,14 +386,29 @@ Rules:
         "usage": {"prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens} if usage else {},
     })
 
-async def classify_intent(prompt: str, model_id: str) -> str:
+# Token budget tiers: {complexity: max_tokens}
+COMPLEXITY_BUDGETS = {
+    1: 1024,   # Simple: a function, a regex, a short note
+    2: 3072,   # Medium: a small script, a short blog post  
+    3: 8192,   # Complex: full app, multi-file architecture
+}
+
+async def classify_intent(prompt: str, model_id: str) -> tuple[str, int]:
+    """Returns (profile, complexity) where complexity is 1/2/3."""
     system_prompt = """
-    Analyze the user prompt and categorize it into exactly one of three profiles:
-    1. "enterprise": Complex software, multiple files, architecture planning.
-    2. "sniper": Single-file scripts, quick code fixes, simple regex, or single functions.
-    3. "newsroom": Creative writing, essays, blog posts, or non-code text generation.
+    Analyze the user prompt and categorize it into EXACTLY one of three profiles AND a complexity score.
     
-    Respond ONLY with a JSON object: {"profile": "enterprise" | "sniper" | "newsroom"}
+    Profiles:
+    - "enterprise": Complex software, multiple files, full apps, architecture planning.
+    - "sniper": Single-file scripts, quick code fixes, simple regex, or single functions.
+    - "newsroom": Creative writing, essays, blog posts, or non-code text generation.
+    
+    Complexity (how much output is expected):
+    - 1 (simple): A one-liner, a short snippet, a quick fix, under 50 words.
+    - 2 (medium): A single file, a short essay, a script under 200 lines.
+    - 3 (complex): Multi-file apps, long-form writing, full architecture.
+    
+    Respond ONLY with a JSON object: {"profile": "enterprise" | "sniper" | "newsroom", "complexity": 1 | 2 | 3}
     """
     try:
         res, _ = await llm.generate(system_prompt, prompt, model_name=model_id, is_json=True)
@@ -405,19 +420,22 @@ async def classify_intent(prompt: str, model_id: str) -> str:
         
         data = json.loads(clean_res.strip())
         profile = data.get("profile", "enterprise")
+        complexity = int(data.get("complexity", 3))
         if profile not in ["enterprise", "sniper", "newsroom"]:
-            return "enterprise"
-        return profile
+            profile = "enterprise"
+        if complexity not in [1, 2, 3]:
+            complexity = 3
+        return profile, complexity
     except Exception as e:
         logging.error(f"Intent classification failed: {e}")
         
     # Fallback to heuristics
     lower_prompt = prompt.lower()
     if "essay" in lower_prompt or "blog" in lower_prompt or "post" in lower_prompt:
-        return "newsroom"
+        return "newsroom", 2
     elif "script" in lower_prompt or "fix" in lower_prompt or "regex" in lower_prompt or "function" in lower_prompt:
-        return "sniper"
-    return "enterprise"
+        return "sniper", 1
+    return "enterprise", 3
 
 async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: dict = None):
     try:
@@ -425,22 +443,26 @@ async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: di
         await safe_send(websocket,{"event": "workflow_start", "message": message})
         await safe_send(websocket,{"event": "station_update", "station": "origin", "status": "active"})
         
-        # Dispatch
+        # Dispatch: classify and get token budget
         origin_model = models_dict.get("origin", "google/gemini-2.5-flash") if models_dict else "google/gemini-2.5-flash"
-        profile = await classify_intent(message, origin_model)
+        profile, complexity = await classify_intent(message, origin_model)
+        max_tokens = COMPLEXITY_BUDGETS[complexity]
+        
+        logging.info(f"[Dispatcher] Profile={profile}, Complexity={complexity}, MaxTokens={max_tokens}")
         
         await safe_send(websocket, {
             "event": "load_profile", 
             "profile": profile,
-            "message": f"Dispatcher selected [{profile.upper()}] routing."
+            "complexity": complexity,
+            "message": f"🎯 Dispatcher → **{profile.upper()}** pipeline | Complexity {complexity}/3 | Token budget: {max_tokens:,}"
         })
         
         if profile == "sniper":
-            await run_sniper_loop(websocket, message, models_dict)
+            await run_sniper_loop(websocket, message, models_dict, max_tokens)
         elif profile == "newsroom":
-            await run_newsroom_loop(websocket, message, models_dict)
+            await run_newsroom_loop(websocket, message, models_dict, max_tokens)
         else:
-            await run_enterprise_loop(websocket, message, models_dict)
+            await run_enterprise_loop(websocket, message, models_dict, max_tokens)
             
     except asyncio.CancelledError:
         logging.info("Swarm execution cancelled by user")
@@ -451,7 +473,7 @@ async def execute_live_swarm(websocket: WebSocket, message: str, models_dict: di
     finally:
         active_swarm_tasks.pop(websocket, None)
 
-async def run_enterprise_loop(websocket: WebSocket, prompt: str, models: dict):
+async def run_enterprise_loop(websocket: WebSocket, prompt: str, models: dict, max_tokens: int = 8192):
 
     # Let the UI reset state
     await safe_send(websocket,{"event": "workflow_start", "message": prompt})
@@ -1178,6 +1200,28 @@ async def websocket_endpoint(websocket: WebSocket):
                 except Exception as e:
                     await safe_send(websocket,{"event": "error", "message": f"Failed to load config: {str(e)}"})
 
+            elif command == "preview_swarm":
+                # Classification-only: show which profile/nodes will be used, don't execute
+                msg = data.get("message", "")
+                models_dict = data.get("models", {})
+                origin_model = models_dict.get("origin", "google/gemini-2.5-flash")
+                try:
+                    await safe_send(websocket, {"event": "station_update", "station": "origin", "status": "active"})
+                    profile, complexity = await classify_intent(msg, origin_model)
+                    max_tokens = COMPLEXITY_BUDGETS[complexity]
+                    await safe_send(websocket, {"event": "station_update", "station": "origin", "status": "complete"})
+                    await safe_send(websocket, {
+                        "event": "load_profile",
+                        "profile": profile,
+                        "complexity": complexity,
+                        "message": f"🔍 **Preview:** Dispatcher selected **{profile.upper()}** pipeline | Complexity {complexity}/3 | Token budget: {max_tokens:,}\n\nClick **Run Swarm** to execute."
+                    })
+                    await safe_send(websocket, {"event": "preview_ready", "profile": profile, "complexity": complexity})
+                except Exception as e:
+                    await safe_send(websocket, {"event": "load_profile", "profile": "enterprise", "complexity": 3,
+                        "message": f"⚠️ Preview failed ({e}), defaulting to Enterprise."})
+                    await safe_send(websocket, {"event": "preview_ready", "profile": "enterprise", "complexity": 3})
+
             elif command == "swarm_message":
                 msg = data.get("message", "Build something")
                 models_dict = data.get("models", {})
@@ -1328,7 +1372,7 @@ async def pty_endpoint(websocket: WebSocket):
             except Exception as e:
                 print(f"Cleanup error for PTY {pid}: {e}")
 
-async def run_sniper_loop(websocket: WebSocket, prompt: str, models: dict):
+async def run_sniper_loop(websocket: WebSocket, prompt: str, models: dict, max_tokens: int = 3072):
     # Let the UI reset state
     await safe_send(websocket,{"event": "workflow_start", "message": prompt})
     
@@ -1419,7 +1463,7 @@ CRITICAL: Return ONLY a valid JSON object with this schema:
     await safe_send(websocket,{"event": "workflow_complete"})
 
 
-async def run_newsroom_loop(websocket: WebSocket, prompt: str, models: dict):
+async def run_newsroom_loop(websocket: WebSocket, prompt: str, models: dict, max_tokens: int = 3072):
     # Let the UI reset state
     await safe_send(websocket,{"event": "workflow_start", "message": prompt})
     
