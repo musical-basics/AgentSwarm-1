@@ -986,7 +986,7 @@ export function FlowmindIDE() {
                 <div className="flex flex-col items-center gap-1 border border-[#fbbf24]/20 rounded-xl p-2" style={{ background: "rgba(251,191,36,0.04)" }}>
                   <span className="text-[8px] text-[#fbbf24]/60 font-bold uppercase tracking-wider mb-1">EXECUTOR TASK FORCES</span>
                   <div className="flex items-center gap-2">
-                    <div className="flex flex-col items-center gap-0.5">
+                    <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#a855f7]/70 uppercase tracking-wider">Wizard</span>
                       <NodeModelSelector value={nodeModels.executorWizard} onChange={v => setNodeModels(p => ({...p, executorWizard: v}))} options={modelOptions} />
                       <WorkflowNode
@@ -996,7 +996,7 @@ export function FlowmindIDE() {
                         icon={<CodeIcon status={nodeState.executor} />}
                       />
                     </div>
-                    <div className="flex flex-col items-center gap-0.5">
+                    <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#22d3ee]/70 uppercase tracking-wider">Specialist</span>
                       <NodeModelSelector value={nodeModels.executorSpecialist} onChange={v => setNodeModels(p => ({...p, executorSpecialist: v}))} options={modelOptions} />
                       <WorkflowNode
@@ -1006,7 +1006,7 @@ export function FlowmindIDE() {
                         icon={<TeamIcon status={nodeState.executor} />}
                       />
                     </div>
-                    <div className="flex flex-col items-center gap-0.5">
+                    <div className="relative flex flex-col items-center gap-0.5">
                       <span className="text-[7px] text-[#34d399]/70 uppercase tracking-wider">Swarm</span>
                       <NodeModelSelector value={nodeModels.executorSwarm} onChange={v => setNodeModels(p => ({...p, executorSwarm: v}))} options={modelOptions} />
                       <WorkflowNode

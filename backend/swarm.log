@@ -22,3 +22,40 @@ Traceback (most recent call last):
     _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 19:08:23,808 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 19:08:26,483 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 19:08:48,766 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:08:56,695 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:08:58,689 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 19:08:59,718 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:09:06,125 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:09:06,126 - INFO - [Station 3] Starting station: planner
+2026-03-28 19:09:06,126 - INFO - [Station 3] Using planner model: google/gemini-3-flash-preview
+2026-03-28 19:09:06,126 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 19:09:07,127 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:09:15,694 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:09:15,696 - INFO - [Station 3] Extracting Topological Graph
+2026-03-28 19:09:15,696 - INFO - [Commander] Extracted topological graph with 3 files.
+2026-03-28 19:09:15,696 - INFO - [Station 3.5] Starting station: commander
+2026-03-28 19:09:15,696 - INFO - [Station 3.5] Topological graph found, generating routing
+2026-03-28 19:09:15,696 - INFO - [Station 3.5] Calling LLM with model google/gemini-3.1-pro-preview
+2026-03-28 19:09:15,696 - INFO - [LLM Generate] Starting request to model: google/gemini-3.1-pro-preview, is_json: True
+2026-03-28 19:09:18,983 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:09:38,577 - INFO - [LLM Generate] Success for model: google/gemini-3.1-pro-preview
+2026-03-28 19:09:38,577 - INFO - [Station 3.5] LLM generation success. Raw response length: 262
+2026-03-28 19:09:38,577 - INFO - [Station 3.5] Saving commander routing artifact
+2026-03-28 19:09:38,579 - INFO - [Station 4] Starting station: executor
+2026-03-28 19:09:38,579 - INFO - [LLM Generate] Starting request to model: anthropic/claude-3.5-sonnet, is_json: False
+2026-03-28 19:09:47,985 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:10:34,168 - INFO - [LLM Generate] Success for model: anthropic/claude-3.5-sonnet
+2026-03-28 19:10:34,172 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: False
+2026-03-28 19:10:35,872 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:10:40,172 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
+2026-03-28 19:10:40,173 - INFO - [LLM Generate] Starting request to model: google/gemini-3-flash-preview, is_json: True
+2026-03-28 19:10:41,609 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 19:10:41,657 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
