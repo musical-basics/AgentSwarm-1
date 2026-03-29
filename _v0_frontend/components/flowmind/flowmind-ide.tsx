@@ -248,8 +248,8 @@ export function FlowmindIDE() {
   const [isDragging, setIsDragging] = useState<"sidebar" | "swarm" | "chat" | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, value: 0 });
 
-  // Node Context Menu state
-  const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeKey: keyof typeof nodeModels } | null>(null);
+  // Swarm Tab state
+  const [swarmTab, setSwarmTab] = useState<"topology" | "config">("topology");
 
   useEffect(() => {
     let ws: WebSocket;
@@ -504,7 +504,6 @@ export function FlowmindIDE() {
   useEffect(() => {
     const handleClickOutside = () => {
       setContextMenu(null);
-      setNodeContextMenu(null);
     };
     document.addEventListener("click", handleClickOutside);
     document.addEventListener("contextmenu", handleClickOutside);
@@ -1072,48 +1071,6 @@ export function FlowmindIDE() {
                 </div>
               </div>
 
-              {/* === NODE CONTEXT MENU === */}
-              {nodeContextMenu && (
-                <div 
-                  className="fixed z-50 bg-[#12121a] border border-[#22d3ee]/30 rounded-lg shadow-2xl py-1 w-48"
-                  style={{ top: nodeContextMenu.y, left: nodeContextMenu.x, boxShadow: "0 10px 40px rgba(0,0,0,0.8), 0 0 15px rgba(34,211,238,0.2)" }}
-                  onClick={e => e.stopPropagation()}
-                  onContextMenu={e => e.preventDefault()}
-                >
-                  <div className="px-3 py-1.5 border-b border-[#22d3ee]/10 mb-1">
-                    <span className="text-[10px] text-[#22d3ee]/70 uppercase tracking-widest font-bold">Select Model Tier</span>
-                  </div>
-                  
-                  <button 
-                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#22d3ee]/20 hover:text-white transition-colors"
-                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "google/gemini-2.5-flash"})); setNodeContextMenu(null); }}
-                  >
-                    ⚡️ Flash <span className="text-[9px] text-gray-500 ml-1">(Ultra Fast)</span>
-                  </button>
-                  <button 
-                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#a855f7]/20 hover:text-white transition-colors"
-                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "anthropic/claude-3-haiku"})); setNodeContextMenu(null); }}
-                  >
-                    🍃 Haiku <span className="text-[9px] text-gray-500 ml-1">(Fast & Smart)</span>
-                  </button>
-                  <button 
-                    className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#fbbf24]/20 hover:text-white transition-colors"
-                    onClick={() => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: "anthropic/claude-3.5-sonnet"})); setNodeContextMenu(null); }}
-                  >
-                    🧠 Sonnet <span className="text-[9px] text-gray-500 ml-1">(Complex Tasks)</span>
-                  </button>
-                  
-                  <div className="px-3 py-1.5 border-t border-[#22d3ee]/10 mt-1">
-                    <span className="text-[9px] text-gray-500 mb-1 block">Custom Selection:</span>
-                    <NodeModelSelector 
-                      value={nodeModels[nodeContextMenu.nodeKey]} 
-                      onChange={v => { setNodeModels(p => ({...p, [nodeContextMenu.nodeKey]: v})); }} 
-                      options={modelOptions} 
-                    />
-                  </div>
-                </div>
-              )}
-
               {/* === ENTERPRISE PROFILE === */}
               {activeProfile === "enterprise" && (
                 <div className="flex flex-col items-center w-full">
@@ -1125,7 +1082,6 @@ export function FlowmindIDE() {
                     status={nodeState.origin}
                     color="cyan"
                     icon={<SparkIcon status={nodeState.origin} />}
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
                     activeModelId={nodeModels.origin}
                   />
                 </div>
@@ -1136,7 +1092,6 @@ export function FlowmindIDE() {
                     status={nodeState.specFactory}
                     color="purple"
                     icon={<ArmoredSparkIcon status={nodeState.specFactory} />}
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "specFactory" }); }}
                     activeModelId={nodeModels.specFactory}
                   />
                 </div>
@@ -1155,7 +1110,6 @@ export function FlowmindIDE() {
                     status={nodeState.overseer}
                     color="indigo"
                     icon={<Eye className="w-5 h-5 text-indigo-400" />}
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "overseer" }); }}
                     activeModelId={nodeModels.overseer}
                   />
                 </div>
@@ -1174,7 +1128,6 @@ export function FlowmindIDE() {
                     status={nodeState.planner}
                     color="emerald"
                     icon={<TeamIcon status={nodeState.planner} />}
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "planner" }); }}
                     activeModelId={nodeModels.planner}
                   />
                 </div>
@@ -1185,7 +1138,6 @@ export function FlowmindIDE() {
                     status={nodeState.commander}
                     color="indigo"
                     icon={<CommanderIcon status={nodeState.commander} />}
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "commander" }); }}
                     activeModelId={nodeModels.commander}
                   />
                 </div>
@@ -1209,7 +1161,6 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="amber"
                         icon={<CodeIcon status={nodeState.executor} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorWizard" }); }}
                         activeModelId={nodeModels.executorWizard}
                       />
                     </div>
@@ -1220,7 +1171,6 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="cyan"
                         icon={<TeamIcon status={nodeState.executor} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSpecialist" }); }}
                         activeModelId={nodeModels.executorSpecialist}
                       />
                     </div>
@@ -1231,7 +1181,6 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="emerald"
                         icon={<SwarmIcon status={nodeState.executor} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSwarm" }); }}
                         activeModelId={nodeModels.executorSwarm}
                       />
                     </div>
@@ -1243,8 +1192,7 @@ export function FlowmindIDE() {
                     title="QA REVIEWER"
                     status={nodeState.qaReviewer}
                     color="rose"
-                    icon={<Shield className="w-5 h-5 text-rose-400" />} 
-                    onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
+                    icon={<Shield className="w-5 h-5 text-rose-400" />}
                     activeModelId={nodeModels.qaReviewer}
                   />
                 </div>
@@ -1262,7 +1210,6 @@ export function FlowmindIDE() {
                         status={nodeState.origin}
                         color="cyan"
                         icon={<SparkIcon status={nodeState.origin} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
                         activeModelId={nodeModels.origin}
                       />
                     </div>
@@ -1275,7 +1222,6 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="amber"
                         icon={<CodeIcon status={nodeState.executor} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorWizard" }); }}
                         activeModelId={nodeModels.executorWizard}
                       />
                     </div>
@@ -1287,8 +1233,7 @@ export function FlowmindIDE() {
                         title="QA REVIEWER"
                         status={nodeState.qaReviewer}
                         color="rose"
-                        icon={<Shield className="w-5 h-5 text-rose-400" />} 
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
+                        icon={<Shield className="w-5 h-5 text-rose-400" />}
                         activeModelId={nodeModels.qaReviewer}
                       />
                     </div>
@@ -1306,7 +1251,6 @@ export function FlowmindIDE() {
                         status={nodeState.origin}
                         color="cyan"
                         icon={<SparkIcon status={nodeState.origin} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "origin" }); }}
                         activeModelId={nodeModels.origin}
                       />
                     </div>
@@ -1319,7 +1263,6 @@ export function FlowmindIDE() {
                         status={nodeState.planner}
                         color="purple"
                         icon={<ArmoredSparkIcon status={nodeState.planner} />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "planner" }); }}
                         activeModelId={nodeModels.planner}
                       />
                     </div>
@@ -1332,7 +1275,6 @@ export function FlowmindIDE() {
                         status={nodeState.executor}
                         color="emerald"
                         icon={<FileCode className="w-5 h-5 text-emerald-400" />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "executorSpecialist" }); }}
                         activeModelId={nodeModels.executorSpecialist}
                       />
                     </div>
@@ -1345,7 +1287,6 @@ export function FlowmindIDE() {
                         status={nodeState.qaReviewer}
                         color="rose"
                         icon={<Eye className="w-5 h-5 text-rose-400" />}
-                        onContextMenu={e => { e.preventDefault(); setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeKey: "qaReviewer" }); }}
                         activeModelId={nodeModels.qaReviewer}
                       />
                     </div>
