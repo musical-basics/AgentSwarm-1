@@ -69,6 +69,7 @@ def save_global_settings(settings: dict):
                     settings.get("chatAgentModel", "google/gemini-2.5-flash")
                 ))
             conn.commit()
+            print(f"[DB] Successfully saved global_settings to NeonDB (Company: {settings.get('chatAgentCompany')}, Model: {settings.get('chatAgentModel')})")
             return
         except Exception as e:
             print(f"Warning: DB write error: {e}")
@@ -77,6 +78,7 @@ def save_global_settings(settings: dict):
             conn.close()
 
     # Fallback to local json
+    print("[DB] No connection string found, falling back to local .ide_state.json for global settings")
     with open(STATE_FILE, "w") as f:
         json.dump(settings, f)
 
@@ -115,6 +117,7 @@ def save_workspace_config(path: str, config: dict):
                     ON CONFLICT (path) DO UPDATE SET config = EXCLUDED.config;
                 """, (path, Json(config)))
             conn.commit()
+            print(f"[DB] Successfully saved workspace config to NeonDB for path: {path}")
             return
         except Exception as e:
             print(f"Warning: DB write workspace error: {e}")
@@ -123,6 +126,7 @@ def save_workspace_config(path: str, config: dict):
             conn.close()
 
     # Fallback to local file
+    print(f"[DB] No connection string found, falling back to local swarm_config.json for workspace: {path}")
     config_file = os.path.join(path, "swarm_config.json")
     try:
         with open(config_file, "w") as f:
