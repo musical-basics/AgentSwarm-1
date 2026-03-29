@@ -182,6 +182,7 @@ export function FlowmindIDE() {
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [activeProfile, setActiveProfile] = useState<"enterprise" | "sniper" | "newsroom">("enterprise");
+  const [swarmInput, setSwarmInput] = useState("");
   const [files, setFiles] = useState<FileItem[]>(initialFiles);
   const [selectedFile, setSelectedFile] = useState("hello_swarm.py");
   
@@ -372,6 +373,7 @@ export function FlowmindIDE() {
           setConnectionState(prev => ({ ...prev, overseerToPlanner: true, plannerToCommander: false, commanderToExecutor: false, executorToQa: false }));
         } else if (data.event === "workflow_start") {
           setIsSimulating(true);
+          setIsChatTyping(false); // clear any stuck typing indicator
           setNodeState({ origin: "idle", specFactory: "idle", overseer: "idle", planner: "idle", commander: "idle", executor: "idle", qaReviewer: "idle" });
           setConnectionState({ originToSpec: false, specToOverseer: false, overseerToPlanner: false, plannerToCommander: false, commanderToExecutor: false, executorToQa: false });
         } else if (data.event === "load_profile") {
@@ -948,45 +950,62 @@ export function FlowmindIDE() {
                   Save Config
                 </motion.button>
 
-                {!isSimulating ? (
-                  <motion.button
-                    onClick={() => { if (chatInput.trim() && socket) socket.send(JSON.stringify({ command: "swarm_message", message: chatInput.trim(), models: nodeModels })); else alert("Type a message to simulate swarm"); }}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
-                    style={{
-                      background: "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
-                      border: "1px solid rgba(34,211,238,0.5)",
-                      boxShadow: "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
-                      color: "#22d3ee",
+                {/* Swarm prompt input + action button */}
+                <div className="flex items-center gap-2 w-full">
+                  <input
+                    type="text"
+                    value={swarmInput}
+                    onChange={e => setSwarmInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && swarmInput.trim() && socket && !isSimulating) {
+                        socket.send(JSON.stringify({ command: "swarm_message", message: swarmInput.trim(), models: nodeModels }));
+                      }
                     }}
-                    whileHover={{ 
-                      scale: 1.05,
-                      boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)",
-                    }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    Simulate Swarm
-                  </motion.button>
-                ) : (
-                  <motion.button
-                    onClick={handleKillSwarm}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
-                    style={{
-                      background: "linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(220,38,38,0.2) 100%)",
-                      border: "1px solid rgba(239,68,68,0.5)",
-                      boxShadow: "0 0 20px rgba(239,68,68,0.3), inset 0 0 20px rgba(239,68,68,0.1)",
-                      color: "#ef4444",
-                    }}
-                    whileHover={{ 
-                      scale: 1.05,
-                      boxShadow: "0 0 30px rgba(239,68,68,0.5), inset 0 0 30px rgba(239,68,68,0.2)",
-                    }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    Kill Swarm
-                  </motion.button>
-                )}
+                    placeholder="Describe what to build..."
+                    disabled={isSimulating}
+                    className="flex-1 text-[10px] bg-[#0d0d12] border border-[#22d3ee]/30 rounded-lg px-3 py-2 text-[#cccccc] outline-none placeholder-[#22d3ee]/30 focus:border-[#22d3ee]/60 disabled:opacity-40 transition-colors"
+                    style={{ boxShadow: "inset 0 0 10px rgba(0,0,0,0.5)" }}
+                  />
+                  {!isSimulating ? (
+                    <motion.button
+                      onClick={() => {
+                        if (swarmInput.trim() && socket) {
+                          socket.send(JSON.stringify({ command: "swarm_message", message: swarmInput.trim(), models: nodeModels }));
+                        } else {
+                          alert("Type a task above to simulate the swarm");
+                        }
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shrink-0"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(34,211,238,0.2) 0%, rgba(168,85,247,0.2) 100%)",
+                        border: "1px solid rgba(34,211,238,0.5)",
+                        boxShadow: "0 0 20px rgba(34,211,238,0.3), inset 0 0 20px rgba(34,211,238,0.1)",
+                        color: "#22d3ee",
+                      }}
+                      whileHover={{ scale: 1.05, boxShadow: "0 0 30px rgba(34,211,238,0.5), inset 0 0 30px rgba(34,211,238,0.2)" }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Simulate
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      onClick={handleKillSwarm}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shrink-0"
+                      style={{
+                        background: "linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(220,38,38,0.2) 100%)",
+                        border: "1px solid rgba(239,68,68,0.5)",
+                        boxShadow: "0 0 20px rgba(239,68,68,0.3), inset 0 0 20px rgba(239,68,68,0.1)",
+                        color: "#ef4444",
+                      }}
+                      whileHover={{ scale: 1.05, boxShadow: "0 0 30px rgba(239,68,68,0.5), inset 0 0 30px rgba(239,68,68,0.2)" }}
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      Kill Swarm
+                    </motion.button>
+                  )}
+                </div>
               </div>
 
               {/* === ENTERPRISE PROFILE === */}
