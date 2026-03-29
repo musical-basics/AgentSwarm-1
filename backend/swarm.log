@@ -101,3 +101,34 @@ RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/N
 2026-03-28 19:44:32,229 - INFO - [LLM Generate] Success for model: google/gemini-3-flash-preview
 2026-03-28 19:46:08,392 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
 2026-03-28 19:48:30,731 - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-28 20:38:37,284 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 20:40:30,102 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 20:40:33,105 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:40:33,142 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:40:41,666 - ERROR - Unhandled exception in FSEventsEmitter
+Traceback (most recent call last):
+  File "/Users/lionelyu/Documents/New Version/AgentSwarm-1/backend/venv/lib/python3.14/site-packages/watchdog/observers/fsevents.py", line 307, in run
+    _fsevents.add_watch(self, self.watch, self.events_callback, self.pathnames)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Cannot add watch <ObservedWatch: path='/Users/lionelyu/Documents/New Version/swarm-1', is_recursive=True> - it is already scheduled
+2026-03-28 20:40:47,148 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:40:47,155 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:23,460 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:23,461 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:23,520 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:23,532 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:23,532 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:41:25,048 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:42:14,302 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:42:14,303 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"
+2026-03-28 20:42:14,337 - INFO - HTTP Request: GET https://openrouter.ai/api/v1/models "HTTP/1.1 200 OK"

@@ -152,7 +152,7 @@ async def safe_send(ws: WebSocket, data: dict):
             pass
 
 import time
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 
 class WorkspaceWatcher(FileSystemEventHandler):
@@ -260,7 +260,11 @@ if _saved_workspace and os.path.isdir(_saved_workspace):
 
 fs_manager = FileSystemManager(WORKSPACE_DIR)
 
-global_observer.schedule(global_watcher, fs_manager.workspace_path, recursive=True)
+try:
+    global_observer.schedule(global_watcher, fs_manager.workspace_path, recursive=True)
+except RuntimeError as e:
+    if "already scheduled" not in str(e):
+        raise e
 global_observer.start()
 
 llm = LLMEngine(os.getenv("OPENROUTER_API_KEY", ""))
@@ -988,14 +992,18 @@ Schema:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    active_ws_connections.add(websocket)
-    
-    # Reload saved global workspace state
-    state = load_ide_state()
-    saved_workspace = state.get("last_workspace")
-    if saved_workspace and os.path.isdir(saved_workspace):
-        fs_manager.workspace_path = saved_workspace
+    try:
+        await websocket.accept()
+        active_ws_connections.add(websocket)
+        
+        # Reload saved global workspace state
+        state = load_ide_state()
+        saved_workspace = state.get("last_workspace")
+        if saved_workspace and os.path.isdir(saved_workspace):
+            fs_manager.workspace_path = saved_workspace
+    except Exception as e:
+        print(f"WS Accept Error: {e}")
+        return
 
     if "layout" in state:
         await safe_send(websocket,{"event": "layout_loaded", "layout": state["layout"], "chatAgentCompany": state.get("chatAgentCompany"), "chatAgentModel": state.get("chatAgentModel")})
