@@ -229,12 +229,12 @@ export function FlowmindIDE() {
 
   // Resizable panel state
   const [sidebarWidth, setSidebarWidth] = useState(256);
-  const [rightPanelWidth, setRightPanelWidth] = useState(480);
-  const [chatHeight, setChatHeight] = useState(280);
+  const [swarmWidth, setSwarmWidth] = useState(480);
+  const [chatWidth, setChatWidth] = useState(350);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Drag state
-  const [isDragging, setIsDragging] = useState<"sidebar" | "rightPanel" | "chat" | null>(null);
+  const [isDragging, setIsDragging] = useState<"sidebar" | "swarm" | "chat" | null>(null);
   const dragStartRef = useRef({ x: 0, y: 0, value: 0 });
 
   useEffect(() => {
@@ -295,8 +295,10 @@ export function FlowmindIDE() {
         } else if (data.event === "layout_loaded") {
           if (data.layout) {
              if (data.layout.sidebarWidth) setSidebarWidth(data.layout.sidebarWidth);
-             if (data.layout.rightPanelWidth) setRightPanelWidth(data.layout.rightPanelWidth);
-             if (data.layout.chatHeight) setChatHeight(data.layout.chatHeight);
+             if (data.layout.swarmWidth) setSwarmWidth(data.layout.swarmWidth);
+             else if (data.layout.rightPanelWidth) setSwarmWidth(data.layout.rightPanelWidth);
+             if (data.layout.chatWidth) setChatWidth(data.layout.chatWidth);
+             else if (data.layout.chatHeight) setChatWidth(data.layout.chatHeight);
           }
           if (data.chatAgentCompany) setChatAgentCompany(data.chatAgentCompany);
           if (data.chatAgentModel) setChatAgentModel(data.chatAgentModel);
@@ -409,16 +411,16 @@ export function FlowmindIDE() {
 
       if (isDragging === "sidebar") {
         const delta = e.clientX - dragStartRef.current.x;
-        const newWidth = Math.max(180, Math.min(400, dragStartRef.current.value + delta));
+        const newWidth = Math.max(180, Math.min(600, dragStartRef.current.value + delta));
         setSidebarWidth(newWidth);
-      } else if (isDragging === "rightPanel") {
+      } else if (isDragging === "swarm") {
         const delta = dragStartRef.current.x - e.clientX;
-        const newWidth = Math.max(300, Math.min(700, dragStartRef.current.value + delta));
-        setRightPanelWidth(newWidth);
+        const newWidth = Math.max(300, Math.min(800, dragStartRef.current.value + delta));
+        setSwarmWidth(newWidth);
       } else if (isDragging === "chat") {
-        const delta = dragStartRef.current.y - e.clientY;
-        const newHeight = Math.max(150, Math.min(500, dragStartRef.current.value + delta));
-        setChatHeight(newHeight);
+        const delta = dragStartRef.current.x - e.clientX;
+        const newWidth = Math.max(250, Math.min(600, dragStartRef.current.value + delta));
+        setChatWidth(newWidth);
       }
     };
 
@@ -441,7 +443,7 @@ export function FlowmindIDE() {
     };
   }, [isDragging]);
 
-  const prevDraggingRef = useRef<"sidebar" | "rightPanel" | "chat" | null>(null);
+  const prevDraggingRef = useRef<"sidebar" | "swarm" | "chat" | null>(null);
   
   // Save layout and chat config when user is NOT dragging, and dependencies have changed.
   useEffect(() => {
@@ -450,34 +452,34 @@ export function FlowmindIDE() {
        if (socketRef.current?.readyState === WebSocket.OPEN) {
          socketRef.current.send(JSON.stringify({
            command: "save_layout",
-           layout: { sidebarWidth, rightPanelWidth, chatHeight },
+           layout: { sidebarWidth, swarmWidth, chatWidth },
            chatAgentCompany,
            chatAgentModel
          }));
        }
     }
     prevDraggingRef.current = isDragging;
-  }, [isDragging, sidebarWidth, rightPanelWidth, chatHeight, chatAgentCompany, chatAgentModel]);
+  }, [isDragging, sidebarWidth, swarmWidth, chatWidth, chatAgentCompany, chatAgentModel]);
 
   // Save when chat agent settings change
   useEffect(() => {
     if (socketRef.current?.readyState === WebSocket.OPEN && !isDragging) {
       socketRef.current.send(JSON.stringify({
         command: "save_layout",
-        layout: { sidebarWidth, rightPanelWidth, chatHeight },
+        layout: { sidebarWidth, swarmWidth, chatWidth },
         chatAgentCompany,
         chatAgentModel
       }));
     }
   }, [chatAgentCompany, chatAgentModel]);
 
-  const startDragging = (type: "sidebar" | "rightPanel" | "chat", e: React.MouseEvent) => {
+  const startDragging = (type: "sidebar" | "swarm" | "chat", e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(type);
     dragStartRef.current = {
       x: e.clientX,
       y: e.clientY,
-      value: type === "sidebar" ? sidebarWidth : type === "rightPanel" ? rightPanelWidth : chatHeight,
+      value: type === "sidebar" ? sidebarWidth : type === "swarm" ? swarmWidth : chatWidth,
     };
   };
 
@@ -766,10 +768,10 @@ export function FlowmindIDE() {
           </PanelGroup>
         </div>
 
-        {/* Right Panel Resize Handle */}
+        {/* Swarm Panel Resize Handle */}
         <div
-          className="w-1 shrink-0 cursor-ew-resize group relative hover:bg-[#a855f7]/30 transition-colors"
-          onMouseDown={(e) => startDragging("rightPanel", e)}
+          className="w-1 shrink-0 cursor-ew-resize group relative hover:bg-[#a855f7]/30 transition-colors z-20"
+          onMouseDown={(e) => startDragging("swarm", e)}
         >
           <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <GripVertical className="w-3 h-3 text-[#a855f7]/60" />
@@ -777,14 +779,14 @@ export function FlowmindIDE() {
           <motion.div 
             className="absolute inset-y-0 left-0 w-px"
             style={{ background: "linear-gradient(to bottom, transparent, #a855f7, transparent)" }}
-            animate={{ opacity: isDragging === "rightPanel" ? 1 : 0 }}
+            animate={{ opacity: isDragging === "swarm" ? 1 : 0 }}
           />
         </div>
 
-        {/* Right Panel - Workflow + Chat with Cyberpunk Style */}
+        {/* Middle Right Panel - Workflow Visualization */}
         <div 
           className="bg-[#0a0a0f] border-l border-[#a855f7]/30 flex flex-col shrink-0 relative"
-          style={{ width: rightPanelWidth }}
+          style={{ width: swarmWidth }}
         >
           {/* Glowing edge */}
           <div className="absolute top-0 left-0 bottom-0 w-px bg-gradient-to-b from-[#a855f7]/40 via-[#22d3ee]/20 to-[#34d399]/40" />
@@ -821,9 +823,9 @@ export function FlowmindIDE() {
             />
 
             {/* Workflow Graph */}
-            <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
+            <div className="relative z-10 flex flex-col items-center justify-center h-full p-6 w-full">
               {/* Top Action Buttons */}
-              <div className="absolute top-4 right-4 flex items-center gap-3 z-30">
+              <div className="absolute top-4 right-4 left-4 flex items-center justify-end flex-wrap gap-2 z-30">
                 <motion.button
                   onClick={handleExportModels}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all"
@@ -925,7 +927,7 @@ export function FlowmindIDE() {
               </div>
 
               {/* Top Row: Origin and Spec */}
-              <div className="flex items-center gap-4 mb-6 mt-12">
+              <div className="flex items-center gap-4 mb-6 mt-28">
                 <div className="relative">
                   <NodeModelSelector value={nodeModels.origin} onChange={v => setNodeModels(p => ({...p, origin: v}))} options={modelOptions} />
                   <WorkflowNode
@@ -1031,26 +1033,27 @@ export function FlowmindIDE() {
               </div>
             </div>
           </div>
+        </div> {/* Closes Swarm Panel */}
 
           {/* Chat Resize Handle */}
           <div
-            className="h-1 shrink-0 cursor-ns-resize group relative hover:bg-[#22d3ee]/30 transition-colors"
+            className="w-1 shrink-0 cursor-ew-resize group relative hover:bg-[#22d3ee]/30 transition-colors z-20"
             onMouseDown={(e) => startDragging("chat", e)}
           >
-            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <GripHorizontal className="w-4 h-3 text-[#22d3ee]/60" />
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <GripVertical className="w-3 h-3 text-[#22d3ee]/60" />
             </div>
             <motion.div 
-              className="absolute inset-x-0 top-0 h-px"
-              style={{ background: "linear-gradient(to right, transparent, #22d3ee, transparent)" }}
+              className="absolute inset-y-0 left-0 w-px"
+              style={{ background: "linear-gradient(to bottom, transparent, #22d3ee, transparent)" }}
               animate={{ opacity: isDragging === "chat" ? 1 : 0 }}
             />
           </div>
 
           {/* Chat Panel */}
           <div 
-            className="border-t border-[#22d3ee]/30 flex flex-col shrink-0 bg-gradient-to-b from-[#0d0d12] to-[#0a0a0f] relative"
-            style={{ height: chatHeight }}
+            className="border-l border-[#22d3ee]/30 flex flex-col shrink-0 bg-gradient-to-b from-[#0d0d12] to-[#0a0a0f] relative"
+            style={{ width: chatWidth }}
           >
             {/* Glowing edge */}
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#22d3ee]/50 to-transparent" />
@@ -1131,7 +1134,6 @@ export function FlowmindIDE() {
               </div>
             </form>
           </div>
-        </div>
       </div>
     </div>
   );
