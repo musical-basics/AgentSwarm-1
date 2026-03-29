@@ -304,6 +304,8 @@ export function FlowmindIDE() {
              if (data.layout.rightPanelWidth) setRightPanelWidth(data.layout.rightPanelWidth);
              if (data.layout.chatHeight) setChatHeight(data.layout.chatHeight);
           }
+          if (data.chatAgentCompany) setChatAgentCompany(data.chatAgentCompany);
+          if (data.chatAgentModel) setChatAgentModel(data.chatAgentModel);
         } else if (data.event === "file_content") {
           setFileContentsCache(prev => ({ ...prev, [data.path]: data.content }));
           setSelectedFile(data.path);
@@ -446,17 +448,34 @@ export function FlowmindIDE() {
   }, [isDragging]);
 
   const prevDraggingRef = useRef<"sidebar" | "rightPanel" | "chat" | null>(null);
+  
+  // Save layout and chat config when user is NOT dragging, and dependencies have changed.
   useEffect(() => {
     if (prevDraggingRef.current && !isDragging) {
+       // Drag ended. Save.
        if (socketRef.current?.readyState === WebSocket.OPEN) {
          socketRef.current.send(JSON.stringify({
            command: "save_layout",
-           layout: { sidebarWidth, rightPanelWidth, chatHeight }
+           layout: { sidebarWidth, rightPanelWidth, chatHeight },
+           chatAgentCompany,
+           chatAgentModel
          }));
        }
     }
     prevDraggingRef.current = isDragging;
-  }, [isDragging, sidebarWidth, rightPanelWidth, chatHeight]);
+  }, [isDragging, sidebarWidth, rightPanelWidth, chatHeight, chatAgentCompany, chatAgentModel]);
+
+  // Save when chat agent settings change
+  useEffect(() => {
+    if (socketRef.current?.readyState === WebSocket.OPEN && !isDragging) {
+      socketRef.current.send(JSON.stringify({
+        command: "save_layout",
+        layout: { sidebarWidth, rightPanelWidth, chatHeight },
+        chatAgentCompany,
+        chatAgentModel
+      }));
+    }
+  }, [chatAgentCompany, chatAgentModel]);
 
   const startDragging = (type: "sidebar" | "rightPanel" | "chat", e: React.MouseEvent) => {
     e.preventDefault();

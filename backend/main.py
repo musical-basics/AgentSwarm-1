@@ -68,22 +68,13 @@ class LLMEngine:
             if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
-import json
-
-STATE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".ide_state.json"))
+from db import get_global_settings, save_global_settings, get_workspace_config, save_workspace_config
 
 def load_ide_state() -> dict:
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return get_global_settings()
 
 def save_ide_state(state: dict):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+    save_global_settings(state)
 
 active_ws_connections = set()
 active_pty_fds = set()
@@ -833,22 +824,16 @@ async def websocket_endpoint(websocket: WebSocket):
         fs_manager.workspace_path = saved_workspace
 
     if "layout" in state:
-        await websocket.send_json({"event": "layout_loaded", "layout": state["layout"]})
+        await websocket.send_json({"event": "layout_loaded", "layout": state["layout"], "chatAgentCompany": state.get("chatAgentCompany"), "chatAgentModel": state.get("chatAgentModel")})
 
     # Send initial file list
     files = fs_manager.list_files()
     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
     
-    # Try to load workspace-specific config automatically
-    config_path = os.path.join(fs_manager.workspace_path, "swarm_config.json")
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r") as f:
-                config_data = json.load(f)
-            await websocket.send_json({"event": "config_loaded", "config": config_data})
-        except:
-            pass
-    
+    # Try to load workspace-specific config automatically (DB or fallback file)
+    config_data = get_workspace_config(fs_manager.workspace_path)
+    if config_data:
+        await websocket.send_json({"event": "config_loaded", "config": config_data})
     try:
         while True:
             data = await websocket.receive_json()
@@ -894,26 +879,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                     
                     # Re-load config from new workspace
-                    config_path = os.path.join(fs_manager.workspace_path, "swarm_config.json")
-                    if os.path.exists(config_path):
-                        try:
-                            with open(config_path, "r") as f:
-                                config_data = json.load(f)
-                            await websocket.send_json({"event": "config_loaded", "config": config_data})
-                        except:
-                            pass
+                    config_data = get_workspace_config(fs_manager.workspace_path)
+                    if config_data:
+                        await websocket.send_json({"event": "config_loaded", "config": config_data})
                 else:
                     await websocket.send_json({"event": "error", "message": "Invalid directory path"})
 
             elif command == "save_layout":
-                state["layout"] = data.get("layout", {})
+                state["layout"] = data.get("layout", state.get("layout", {}))
+                if "chatAgentCompany" in data:
+                    state["chatAgentCompany"] = data["chatAgentCompany"]
+                if "chatAgentModel" in data:
+                    state["chatAgentModel"] = data["chatAgentModel"]
                 save_ide_state(state)
 
             elif command == "save_config":
                 try:
-                    import json
                     config_data = data.get("config", {})
-                    fs_manager.write_file("swarm_config.json", json.dumps(config_data, indent=2))
+                    save_workspace_config(fs_manager.workspace_path, config_data)
                     files = fs_manager.list_files()
                     await websocket.send_json({"event": "file_list", "files": files, "workspace_name": os.path.basename(fs_manager.workspace_path) or "Workspace"})
                 except Exception as e:
@@ -921,15 +904,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif command == "load_config":
                 try:
-                    import json
-                    config_path = os.path.join(fs_manager.workspace_path, "swarm_config.json")
-                    if os.path.exists(config_path):
-                        with open(config_path, "r") as f:
-                            config_data = json.load(f)
+                    config_data = get_workspace_config(fs_manager.workspace_path)
+                    if config_data:
                         await websocket.send_json({"event": "config_loaded", "config": config_data})
                         await websocket.send_json({"event": "chat", "sender": "swarm", "text": "Configuration loaded from workspace.", "stage": "origin"})
                     else:
-                        await websocket.send_json({"event": "error", "message": "No swarm_config.json found in the current workspace."})
+                        await websocket.send_json({"event": "error", "message": "No swarm_config.json found in the current workspace/DB."})
                 except Exception as e:
                     await websocket.send_json({"event": "error", "message": f"Failed to load config: {str(e)}"})
 
